@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <script>
+      try {
+        document.documentElement.dataset.theme = localStorage.getItem("gaffer-theme") || "dark";
+      } catch (e) {
+        document.documentElement.dataset.theme = "dark";
+      }
+    </script>
+    <title>Predikt — live football predictions with a private AI pundit</title>
+    <meta name="description" content="Free-to-play live football prediction pools with your mates and the Gaffer, a private AI pundit that reads every match and reacts live. Free to play." />
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

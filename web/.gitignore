@@ -1,0 +1,18 @@
+# build output
+dist/
+dist-ssr/
+*.local
+
+# vite
+.vite/
+
+# deps
+node_modules/
+
+# logs
+logs/
+*.log
+npm-debug.log*
+
+# os
+.DS_Store
