@@ -192,6 +192,22 @@ export async function getOrCreatePool(fixtureId: string, stakeHuman = DEFAULT_ST
   return pool;
 }
 
+/** Fund a wallet's gas + mint its demo USDt (local mode only; no-op on testnet). */
+export async function fundWallet(address: Address): Promise<void> {
+  if (config.mode !== 'local') return;
+  await fundGas(address, '1');
+  await mintUsdt(usdtAddress, address, usdt(STARTING_BALANCE));
+}
+
+/** USDt balance of an address (human units); 0 if the read fails. */
+export async function walletBalance(address: Address): Promise<number> {
+  try {
+    return fromUsdt(await wallet.tokenBalance(address, usdtAddress));
+  } catch {
+    return 0;
+  }
+}
+
 /** Create a self-custodial fan wallet, fund gas + mint demo USDt (local). */
 export async function createWallet(displayName: string): Promise<{
   address: Address;
@@ -201,10 +217,7 @@ export async function createWallet(displayName: string): Promise<{
   usdtHuman: number;
 }> {
   const fan = await wallet.createFan(displayName);
-  if (config.mode === 'local') {
-    await fundGas(fan.address, '1');
-    await mintUsdt(usdtAddress, fan.address, usdt(STARTING_BALANCE));
-  }
+  await fundWallet(fan.address);
   const bal = await wallet.tokenBalance(fan.address, usdtAddress);
   return {
     address: fan.address,
@@ -212,6 +225,22 @@ export async function createWallet(displayName: string): Promise<{
     mnemonic: fan.mnemonic,
     backend: fan.backend,
     usdtHuman: fromUsdt(bal),
+  };
+}
+
+/** Re-register a wallet from an existing recovery phrase (returning user). */
+export async function importWallet(mnemonic: string, displayName: string): Promise<{
+  address: Address;
+  displayName: string;
+  backend: string;
+  usdtHuman: number;
+}> {
+  const fan = await wallet.importFan(mnemonic, displayName);
+  return {
+    address: fan.address,
+    displayName: fan.displayName,
+    backend: fan.backend,
+    usdtHuman: await walletBalance(fan.address),
   };
 }
 

@@ -89,6 +89,15 @@ export interface Account {
   points: number;
 }
 
+/** Result of wallet-as-identity sign-in / sign-up. */
+export interface WalletAuth {
+  account: Account;
+  token: string;
+  wallet: { address: string; backend: string; usdtHuman: number };
+  mnemonic?: string; // returned ONCE, only when a brand-new phrase is generated
+  isNew: boolean;
+}
+
 export interface PoolMemberView {
   userId: string;
   handle: string;
@@ -334,6 +343,15 @@ export const api = {
   simulateLive: (id: string, minute: number, homeGoals: number, awayGoals: number, status: "live" | "finished" = "live") =>
     post<FixtureSummary>(`/dev/live/${id}`, { minute, homeGoals, awayGoals, status }),
   clearLive: (id: string) => del<FixtureSummary>(`/dev/live/${id}`),
+
+  // ---- wallet-as-identity auth (self-custodial) ----
+  auth: {
+    // Create a brand-new wallet + account; recovery phrase returned once.
+    newWallet: (handle?: string) => post<WalletAuth>("/auth/wallet/new", handle ? { handle } : {}),
+    // Sign in / recover an account from its BIP-39 recovery phrase.
+    restore: (mnemonic: string, handle?: string) =>
+      post<WalletAuth>("/auth/wallet/restore", handle ? { mnemonic, handle } : { mnemonic }),
+  },
 
   // ---- free-to-play accounts + points pools ----
   account: {

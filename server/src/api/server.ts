@@ -11,6 +11,7 @@ import { streamGafferRead, streamLiveReaction, streamAsk } from '../qvac/service
 import { status as aiStatus, ensureLoaded } from '../qvac/engine.js';
 import * as voice from '../qvac/voice.js';
 import * as accounts from '../store/accounts.js';
+import * as walletAuth from '../store/walletAuth.js';
 import * as store from '../store/pools.js';
 import * as wallets from '../store/wallets.js';
 import * as organize from '../organize/store.js';
@@ -41,6 +42,31 @@ export function buildApp() {
   app.post('/api/account', async (req) => {
     const { handle } = (req.body ?? {}) as { handle?: string };
     return accounts.createAccount(handle || 'Anon'); // { account, token }
+  });
+
+  // ---- wallet-as-identity auth (self-custodial) ----
+  // Your WDK recovery phrase IS your login: it derives your wallet address, and
+  // the account is keyed to it — so the same phrase recovers you on any device.
+
+  // Create a brand-new wallet + account. Recovery phrase returned ONCE.
+  app.post('/api/auth/wallet/new', async (req, reply) => {
+    const { handle } = (req.body ?? {}) as { handle?: string };
+    try {
+      return await walletAuth.createWalletAccount(handle);
+    } catch (err) {
+      return reply.code(500).send({ error: (err as Error).message });
+    }
+  });
+
+  // Sign in / recover from a recovery phrase.
+  app.post('/api/auth/wallet/restore', async (req, reply) => {
+    const { mnemonic, handle } = (req.body ?? {}) as { mnemonic?: string; handle?: string };
+    if (!mnemonic || !mnemonic.trim()) return reply.code(400).send({ error: 'recovery phrase required' });
+    try {
+      return await walletAuth.signInWithMnemonic(mnemonic, handle);
+    } catch (err) {
+      return reply.code(400).send({ error: (err as Error).message });
+    }
   });
 
   app.get('/api/account', async (req, reply) => {

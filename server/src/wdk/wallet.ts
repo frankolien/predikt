@@ -87,6 +87,37 @@ export async function createFan(displayName: string): Promise<NewFan> {
   return { address, displayName, mnemonic, backend };
 }
 
+/** A fresh BIP-39 recovery phrase (12 words). */
+export function newMnemonic(): string {
+  return generateMnemonic(english);
+}
+
+/** Normalize a pasted recovery phrase: trim, collapse whitespace, lowercase. */
+export function normalizeMnemonic(input: string): string {
+  return input.trim().replace(/\s+/g, ' ').toLowerCase();
+}
+
+/** Structural validation of a recovery phrase (word count + wordlist membership). */
+export function isValidMnemonic(input: string): boolean {
+  const words = normalizeMnemonic(input).split(' ');
+  if (words.length !== 12 && words.length !== 24) return false;
+  return words.every((w) => english.includes(w));
+}
+
+/**
+ * Re-register a fan from an EXISTING recovery phrase (a returning user signing
+ * in). Derives the same deterministic address and holds the key in memory so the
+ * fan can sign this session's buy-ins. Throws on an invalid phrase.
+ */
+export async function importFan(mnemonic: string, displayName: string): Promise<NewFan> {
+  await ensureBackend();
+  const phrase = normalizeMnemonic(mnemonic);
+  if (!isValidMnemonic(phrase)) throw new Error('invalid recovery phrase');
+  const address = await deriveAddress(phrase);
+  fans.set(address.toLowerCase(), { address, displayName, mnemonic: phrase });
+  return { address, displayName, mnemonic: phrase, backend };
+}
+
 export function getFan(address: string): FanRecord | undefined {
   return fans.get(address.toLowerCase());
 }

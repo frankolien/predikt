@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Outlet } from "react-router-dom";
-import { api, getToken, setToken, type Account, type Health, type Wallet } from "./lib/api";
+import { api, getToken, setToken, type Account, type Health, type Wallet, type WalletAuth } from "./lib/api";
 import { AppContext } from "./context";
 import { useTheme } from "./lib/theme";
 import { Nav } from "./components/Nav";
@@ -95,9 +95,48 @@ export function AppShell() {
       .catch(() => {});
   }, []);
 
+  // A fresh account's demo USD₮ mints on-chain in the background — poll the
+  // balance a few times so it lands in the UI without a manual refresh.
+  const pollFunding = useCallback(() => {
+    let n = 0;
+    const id = setInterval(() => {
+      refreshBalance();
+      if (++n >= 8) clearInterval(id);
+    }, 2000);
+  }, [refreshBalance]);
+
+  // Commit a wallet-auth result into the live session. For a brand-new account
+  // this runs only after the user has saved their recovery phrase; the fresh
+  // demo USD₮ is still minting, so poll the balance until it lands.
+  const commitAuth = useCallback(
+    (r: WalletAuth) => {
+      setToken(r.token);
+      setAccount(r.account);
+      setWallet({
+        address: r.wallet.address,
+        displayName: "You",
+        mnemonic: r.mnemonic ?? "",
+        backend: r.wallet.backend,
+        usdtHuman: r.wallet.usdtHuman,
+      });
+      if (r.isNew) pollFunding();
+    },
+    [pollFunding],
+  );
+
+  // Sign in / recover an existing account from its recovery phrase (single step).
+  const restoreAccount = useCallback(
+    async (mnemonic: string) => {
+      const r = await api.auth.restore(mnemonic);
+      commitAuth(r);
+      return r.account;
+    },
+    [commitAuth],
+  );
+
   return (
     <AppContext.Provider
-      value={{ health, account, signIn, signOut, refreshAccount, wallet, setWallet, refreshBalance, connectWallet }}
+      value={{ health, account, commitAuth, restoreAccount, signIn, signOut, refreshAccount, wallet, setWallet, refreshBalance, connectWallet }}
     >
       <Nav ai={health?.ai} account={account} theme={theme} onToggleTheme={toggle} />
       <Outlet />
