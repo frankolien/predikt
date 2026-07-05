@@ -4,6 +4,7 @@
  */
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
+import fastifyStatic from '@fastify/static';
 import type { Address } from 'viem';
 import { config } from '../config.js';
 import * as manager from '../pool/manager.js';
@@ -70,16 +71,16 @@ export function buildApp() {
   });
 
   app.get('/api/account', async (req, reply) => {
-    const a = authed(req);
+    const a = await authed(req);
     if (!a) return reply.code(401).send({ error: 'not signed in' });
     return { account: a };
   });
 
-  app.get('/api/leaderboard', async () => ({ leaderboard: accounts.leaderboard(20) }));
+  app.get('/api/leaderboard', async () => ({ leaderboard: await accounts.leaderboard(20) }));
 
   // Link a self-custodial USD₮ wallet (WDK) to the signed-in account.
   app.post('/api/account/wallet', async (req, reply) => {
-    const a = authed(req);
+    const a = await authed(req);
     if (!a) return reply.code(401).send({ error: 'sign in first' });
     try {
       return await wallets.linkWallet(a.id);
@@ -89,13 +90,13 @@ export function buildApp() {
   });
 
   app.get('/api/account/wallet', async (req, reply) => {
-    const a = authed(req);
+    const a = await authed(req);
     if (!a) return reply.code(401).send({ error: 'sign in first' });
     return (await wallets.getWallet(a.id)) ?? { address: null, usdtHuman: 0 };
   });
 
   app.post('/api/pools', async (req, reply) => {
-    const a = authed(req);
+    const a = await authed(req);
     if (!a) return reply.code(401).send({ error: 'sign in first' });
     const b = (req.body ?? {}) as { fixtureId?: string; name?: string; buyIn?: number; isPublic?: boolean; currency?: 'points' | 'usdt' };
     if (!b.fixtureId) return reply.code(400).send({ error: 'fixtureId required' });
@@ -115,20 +116,20 @@ export function buildApp() {
 
   app.get('/api/pools/:id', async (req, reply) => {
     const { id } = req.params as { id: string };
-    const p = store.getPool(id);
+    const p = await store.getPool(id);
     if (!p) return reply.code(404).send({ error: 'pool not found' });
     return p;
   });
 
   app.get('/api/pools/code/:code', async (req, reply) => {
     const { code } = req.params as { code: string };
-    const p = store.getPoolByCode(code);
+    const p = await store.getPoolByCode(code);
     if (!p) return reply.code(404).send({ error: 'no pool with that code' });
     return p;
   });
 
   app.post('/api/pools/join', async (req, reply) => {
-    const a = authed(req);
+    const a = await authed(req);
     if (!a) return reply.code(401).send({ error: 'sign in first' });
     const b = (req.body ?? {}) as {
       poolId?: string;
@@ -143,27 +144,27 @@ export function buildApp() {
         predHome: b.prediction?.homeGoals ?? 0,
         predAway: b.prediction?.awayGoals ?? 0,
       });
-      return { pool, account: accounts.getAccount(a.id) };
+      return { pool, account: await accounts.getAccount(a.id) };
     } catch (err) {
       return reply.code(400).send({ error: (err as Error).message });
     }
   });
 
   app.get('/api/me/pools', async (req, reply) => {
-    const a = authed(req);
+    const a = await authed(req);
     if (!a) return reply.code(401).send({ error: 'sign in first' });
-    return { pools: store.poolsForUser(a.id) };
+    return { pools: await store.poolsForUser(a.id) };
   });
 
   app.get('/api/fixtures/:id/pools', async (req) => {
     const { id } = req.params as { id: string };
-    return { pools: store.publicPoolsForFixture(id) };
+    return { pools: await store.publicPoolsForFixture(id) };
   });
 
   // ---- ORGANIZE — knockout tournaments ----
 
   app.post('/api/tournaments', async (req, reply) => {
-    const a = authed(req);
+    const a = await authed(req);
     if (!a) return reply.code(401).send({ error: 'sign in first' });
     const b = (req.body ?? {}) as {
       name?: string;
@@ -181,26 +182,26 @@ export function buildApp() {
 
   app.get('/api/tournaments/:id', async (req, reply) => {
     const { id } = req.params as { id: string };
-    const t = organize.getTournament(id);
+    const t = await organize.getTournament(id);
     if (!t) return reply.code(404).send({ error: 'tournament not found' });
     return t;
   });
 
   app.get('/api/tournaments/code/:code', async (req, reply) => {
     const { code } = req.params as { code: string };
-    const t = organize.getTournamentByCode(code);
+    const t = await organize.getTournamentByCode(code);
     if (!t) return reply.code(404).send({ error: 'no cup with that code' });
     return t;
   });
 
   app.get('/api/me/tournaments', async (req, reply) => {
-    const a = authed(req);
+    const a = await authed(req);
     if (!a) return reply.code(401).send({ error: 'sign in first' });
-    return { tournaments: organize.tournamentsForUser(a.id) };
+    return { tournaments: await organize.tournamentsForUser(a.id) };
   });
 
   app.post('/api/tournaments/join', async (req, reply) => {
-    const a = authed(req);
+    const a = await authed(req);
     if (!a) return reply.code(401).send({ error: 'sign in first' });
     const b = (req.body ?? {}) as { code?: string; tournamentId?: string };
     try {
@@ -211,7 +212,7 @@ export function buildApp() {
   });
 
   app.post('/api/tournaments/:id/entrants', async (req, reply) => {
-    const a = authed(req);
+    const a = await authed(req);
     if (!a) return reply.code(401).send({ error: 'sign in first' });
     const { id } = req.params as { id: string };
     const b = (req.body ?? {}) as { name?: string };
@@ -223,7 +224,7 @@ export function buildApp() {
   });
 
   app.post('/api/tournaments/:id/start', async (req, reply) => {
-    const a = authed(req);
+    const a = await authed(req);
     if (!a) return reply.code(401).send({ error: 'sign in first' });
     const { id } = req.params as { id: string };
     const b = (req.body ?? {}) as { seeding?: 'random' | 'join' };
@@ -235,7 +236,7 @@ export function buildApp() {
   });
 
   app.post('/api/tournaments/:id/matches/:mid/report', async (req, reply) => {
-    const a = authed(req);
+    const a = await authed(req);
     if (!a) return reply.code(401).send({ error: 'sign in first' });
     const { id, mid } = req.params as { id: string; mid: string };
     const b = (req.body ?? {}) as { homeScore?: number; awayScore?: number; penaltyWinner?: 'home' | 'away' };
@@ -254,7 +255,7 @@ export function buildApp() {
   });
 
   app.post('/api/tournaments/:id/cancel', async (req, reply) => {
-    const a = authed(req);
+    const a = await authed(req);
     if (!a) return reply.code(401).send({ error: 'sign in first' });
     const { id } = req.params as { id: string };
     try {
@@ -305,7 +306,7 @@ export function buildApp() {
   app.get('/api/fantasy/draft', async () => fantasy.autoDraft());
 
   app.post('/api/fantasy/leagues', async (req, reply) => {
-    const a = authed(req);
+    const a = await authed(req);
     if (!a) return reply.code(401).send({ error: 'sign in first' });
     const b = (req.body ?? {}) as { name?: string; buyIn?: number; splitBps?: number[]; currency?: 'points' | 'usdt' };
     try {
@@ -317,26 +318,26 @@ export function buildApp() {
 
   app.get('/api/fantasy/leagues/:id', async (req, reply) => {
     const { id } = req.params as { id: string };
-    const lg = fantasy.getLeague(id);
+    const lg = await fantasy.getLeague(id);
     if (!lg) return reply.code(404).send({ error: 'league not found' });
     return lg;
   });
 
   app.get('/api/fantasy/leagues/code/:code', async (req, reply) => {
     const { code } = req.params as { code: string };
-    const lg = fantasy.getLeagueByCode(code);
+    const lg = await fantasy.getLeagueByCode(code);
     if (!lg) return reply.code(404).send({ error: 'no league with that code' });
     return lg;
   });
 
   app.get('/api/me/fantasy', async (req, reply) => {
-    const a = authed(req);
+    const a = await authed(req);
     if (!a) return reply.code(401).send({ error: 'sign in first' });
-    return { leagues: fantasy.leaguesForUser(a.id) };
+    return { leagues: await fantasy.leaguesForUser(a.id) };
   });
 
   app.post('/api/fantasy/leagues/join', async (req, reply) => {
-    const a = authed(req);
+    const a = await authed(req);
     if (!a) return reply.code(401).send({ error: 'sign in first' });
     const b = (req.body ?? {}) as {
       code?: string;
@@ -364,7 +365,7 @@ export function buildApp() {
   });
 
   app.post('/api/fantasy/leagues/:id/start', async (req, reply) => {
-    const a = authed(req);
+    const a = await authed(req);
     if (!a) return reply.code(401).send({ error: 'sign in first' });
     const { id } = req.params as { id: string };
     try {
@@ -375,7 +376,7 @@ export function buildApp() {
   });
 
   app.post('/api/fantasy/leagues/:id/settle', async (req, reply) => {
-    const a = authed(req);
+    const a = await authed(req);
     if (!a) return reply.code(401).send({ error: 'sign in first' });
     const { id } = req.params as { id: string };
     try {
@@ -667,6 +668,22 @@ export function buildApp() {
       }
     })();
   });
+
+  // ---- serve the built SPA (single-service deploy) ----
+  // `wildcard: false` registers a route per real file (index.html, /assets/*, …)
+  // instead of a catch-all `/*`, so the API routes and SSE streams above are never
+  // shadowed. Anything that isn't a real file OR an /api route falls through to the
+  // handler below, which serves index.html so client-side routing (Predict, Fantasy,
+  // Organize deep links) works on refresh.
+  if (config.serveWeb) {
+    app.register(fastifyStatic, { root: config.webDist, wildcard: false });
+    app.setNotFoundHandler((req, reply) => {
+      if (req.method !== 'GET' || req.url.startsWith('/api')) {
+        return reply.code(404).send({ error: 'not found' });
+      }
+      return reply.sendFile('index.html');
+    });
+  }
 
   return app;
 }

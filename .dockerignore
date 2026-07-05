@@ -1,0 +1,36 @@
+# deps + build outputs are regenerated inside the image (for the right platform)
+node_modules
+**/node_modules
+web/dist
+server/dist
+contracts/out
+contracts/cache
+contracts/broadcast
+
+# vcs, editor, os
+.git
+.gitignore
+.vscode
+.idea
+.claude
+.DS_Store
+
+# secrets + local state — never bake into the image
+.env
+.env.*
+!.env.example
+*.seed
+wallets.local.json
+deployments.local.json
+
+# large on-device model cache
+.qvac
+models
+*.gguf
+*.bin
+
+# local database + logs
+*.db
+*.db-shm
+*.db-wal
+*.log

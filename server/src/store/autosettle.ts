@@ -17,7 +17,7 @@ export function startAutoSettle(): void {
       for (const id of ids) {
         const s = manager.fixtureSummary(id);
         if (!s || s.matchStatus !== 'finished' || !s.result) continue;
-        for (const p of openPoolsForFixture(id)) {
+        for (const p of await openPoolsForFixture(id)) {
           try {
             await settlePool(p.id, s.result);
             console.log(`[autosettle] pool ${p.code} settled ${s.result.homeGoals}-${s.result.awayGoals}`);

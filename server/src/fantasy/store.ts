@@ -11,7 +11,7 @@ import { randomUUID } from 'node:crypto';
 import { and, eq, or } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { fantasyLeagues, fantasySquads, fantasySquadPlayers, users } from '../db/schema.js';
-import { adjustPoints } from '../store/accounts.js';
+import { adjustPoints, type Tx } from '../store/accounts.js';
 import { walletAddressOf } from '../store/wallets.js';
 import * as escrow from '../wdk/escrow.js';
 import * as manager from '../pool/manager.js';
@@ -279,7 +279,7 @@ function parseSplit(raw: string): number[] {
   }
 }
 
-export function createLeague(opts: {
+export async function createLeague(opts: {
   creatorId: string;
   name?: string;
   buyIn?: number;
@@ -296,23 +296,22 @@ export function createLeague(opts: {
   const id = randomUUID();
   let code = inviteCode();
   for (let i = 0; i < 4; i++) {
-    if (!db.select({ id: fantasyLeagues.id }).from(fantasyLeagues).where(eq(fantasyLeagues.code, code)).get()) break;
+    const clash = (await db.select({ id: fantasyLeagues.id }).from(fantasyLeagues).where(eq(fantasyLeagues.code, code)).limit(1))[0];
+    if (!clash) break;
     code = inviteCode();
   }
-  db.insert(fantasyLeagues)
-    .values({
-      id,
-      code,
-      name,
-      creatorId: opts.creatorId,
-      buyIn,
-      currency,
-      splitBps: JSON.stringify(split),
-      status: 'open',
-      createdAt: new Date(),
-    })
-    .run();
-  return getLeague(id)!;
+  await db.insert(fantasyLeagues).values({
+    id,
+    code,
+    name,
+    creatorId: opts.creatorId,
+    buyIn,
+    currency,
+    splitBps: JSON.stringify(split),
+    status: 'open',
+    createdAt: new Date(),
+  });
+  return (await getLeague(id))!;
 }
 
 export async function joinLeague(opts: {
@@ -325,14 +324,16 @@ export async function joinLeague(opts: {
   viceId: string;
   chip?: Chip;
 }) {
-  const lg = opts.leagueId ? row(opts.leagueId) : opts.code ? rowByCode(opts.code) : null;
+  const lg = opts.leagueId ? await row(opts.leagueId) : opts.code ? await rowByCode(opts.code) : null;
   if (!lg) throw new Error('league not found');
   if (lg.status !== 'open') throw new Error('entries are closed for this league');
-  const dup = db
-    .select({ id: fantasySquads.id })
-    .from(fantasySquads)
-    .where(and(eq(fantasySquads.leagueId, lg.id), eq(fantasySquads.userId, opts.userId)))
-    .get();
+  const dup = (
+    await db
+      .select({ id: fantasySquads.id })
+      .from(fantasySquads)
+      .where(and(eq(fantasySquads.leagueId, lg.id), eq(fantasySquads.userId, opts.userId)))
+      .limit(1)
+  )[0];
   if (dup) throw new Error('you already have a squad in this league');
 
   const { players, bench, budgetUsed10 } = validateEntry({
@@ -350,84 +351,77 @@ export async function joinLeague(opts: {
     .sort((a, b) => b.price - a.price)
     .forEach((p, i) => benchOrder.set(p.id, i + 1));
 
-  // Insert the squad + its 15 players. Executes on the shared connection, so it
-  // joins the active BEGIN/COMMIT when called inside `db.transaction` (points),
-  // and runs standalone on the USD₮ path (money already moved on-chain).
-  const writeSquad = (depositTx?: string) => {
+  // Insert the squad + its 15 players. Must run on the transaction handle (`tx`)
+  // — with postgres-js a `db.*` call inside a transaction would hit a different
+  // pooled connection and escape it.
+  const writeSquad = async (tx: Tx, depositTx?: string) => {
     const squadId = randomUUID();
-    db.insert(fantasySquads)
-      .values({
-        id: squadId,
-        leagueId: lg.id,
-        userId: opts.userId,
-        captainPlayerId: opts.captainId,
-        viceCaptainPlayerId: opts.viceId,
-        chip,
-        budgetUsed: budgetUsed10,
-        staked: lg.buyIn,
-        depositTx,
-        createdAt: new Date(),
-      })
-      .run();
+    await tx.insert(fantasySquads).values({
+      id: squadId,
+      leagueId: lg.id,
+      userId: opts.userId,
+      captainPlayerId: opts.captainId,
+      viceCaptainPlayerId: opts.viceId,
+      chip,
+      budgetUsed: budgetUsed10,
+      staked: lg.buyIn,
+      depositTx,
+      createdAt: new Date(),
+    });
     for (const p of players) {
       const isStarter = starterSet.has(p.id);
-      db.insert(fantasySquadPlayers)
-        .values({
-          id: randomUUID(),
-          squadId,
-          playerId: p.id,
-          starter: isStarter ? 1 : 0,
-          benchOrder: isStarter ? 0 : benchOrder.get(p.id) ?? 0,
-        })
-        .run();
+      await tx.insert(fantasySquadPlayers).values({
+        id: randomUUID(),
+        squadId,
+        playerId: p.id,
+        starter: isStarter ? 1 : 0,
+        benchOrder: isStarter ? 0 : benchOrder.get(p.id) ?? 0,
+      });
     }
   };
 
   if (lg.currency === 'usdt') {
     let depositTx: string | undefined;
     if (lg.buyIn > 0) {
-      const addr = walletAddressOf(opts.userId);
+      const addr = await walletAddressOf(opts.userId);
       if (!addr) throw new Error('connect a USD₮ wallet first');
-      depositTx = await escrow.collect(addr, BigInt(lg.buyIn)); // real USD₮ → treasury
+      depositTx = await escrow.collect(addr, BigInt(lg.buyIn)); // real USD₮ → treasury (before we open a txn)
     }
-    writeSquad(depositTx);
+    await db.transaction(async (tx) => writeSquad(tx, depositTx));
   } else {
-    db.transaction((tx) => {
-      if (lg.buyIn > 0) adjustPoints(tx, opts.userId, -lg.buyIn, 'stake', lg.id);
-      writeSquad();
+    await db.transaction(async (tx) => {
+      if (lg.buyIn > 0) await adjustPoints(tx, opts.userId, -lg.buyIn, 'stake', lg.id);
+      await writeSquad(tx);
     });
   }
-  return getLeague(lg.id)!;
+  return (await getLeague(lg.id))!;
 }
 
-export function startLeague(opts: { leagueId: string; creatorId: string }) {
-  const lg = row(opts.leagueId);
+export async function startLeague(opts: { leagueId: string; creatorId: string }) {
+  const lg = await row(opts.leagueId);
   if (!lg) throw new Error('league not found');
   if (lg.creatorId !== opts.creatorId) throw new Error('only the creator can lock the league');
   if (lg.status !== 'open') throw new Error('league already started');
-  db.update(fantasyLeagues).set({ status: 'live', lockedAt: new Date() }).where(eq(fantasyLeagues.id, lg.id)).run();
-  return getLeague(lg.id)!;
+  await db.update(fantasyLeagues).set({ status: 'live', lockedAt: new Date() }).where(eq(fantasyLeagues.id, lg.id));
+  return (await getLeague(lg.id))!;
 }
 
 export async function settleLeague(opts: { leagueId: string; creatorId: string }) {
-  const lg = row(opts.leagueId);
+  const lg = await row(opts.leagueId);
   if (!lg) throw new Error('league not found');
   if (lg.creatorId !== opts.creatorId) throw new Error('only the creator can settle');
   if (lg.status === 'settled') throw new Error('league already settled');
 
-  const view = getLeague(lg.id)!;
+  const view = (await getLeague(lg.id))!;
   const ranked = view.standings; // already sorted, rank assigned
   const split = parseSplit(lg.splitBps);
   // The view exposes `staked` in DISPLAY units; settlement math (and escrow.pay)
   // must run in BASE units, so read the raw stakes straight from the DB.
-  const stakedBase = new Map(
-    db
-      .select({ id: fantasySquads.id, staked: fantasySquads.staked })
-      .from(fantasySquads)
-      .where(eq(fantasySquads.leagueId, lg.id))
-      .all()
-      .map((r) => [r.id, r.staked]),
-  );
+  const stakeRows = await db
+    .select({ id: fantasySquads.id, staked: fantasySquads.staked })
+    .from(fantasySquads)
+    .where(eq(fantasySquads.leagueId, lg.id));
+  const stakedBase = new Map(stakeRows.map((r) => [r.id, r.staked]));
   const pot = ranked.reduce((a, s) => a + (stakedBase.get(s.squadId) ?? 0), 0);
 
   // Conserved integer payout by placement; dust to the winner.
@@ -451,29 +445,29 @@ export async function settleLeague(opts: { leagueId: string; creatorId: string }
       const won = payout.get(s.squadId) ?? 0;
       let payoutTx: string | undefined;
       if (won > 0) {
-        const addr = walletAddressOf(s.userId);
+        const addr = await walletAddressOf(s.userId);
         if (addr) payoutTx = await escrow.pay(addr, BigInt(won)); // real USD₮ → winner
       }
-      db.update(fantasySquads)
+      await db
+        .update(fantasySquads)
         .set({ placement: i + 1, payout: won > 0 ? won : null, payoutTx })
-        .where(eq(fantasySquads.id, s.squadId))
-        .run();
+        .where(eq(fantasySquads.id, s.squadId));
     }
-    db.update(fantasyLeagues).set({ status: 'settled', settledAt: new Date() }).where(eq(fantasyLeagues.id, lg.id)).run();
+    await db.update(fantasyLeagues).set({ status: 'settled', settledAt: new Date() }).where(eq(fantasyLeagues.id, lg.id));
   } else {
-    db.transaction((tx) => {
-      ranked.forEach((s, i) => {
+    await db.transaction(async (tx) => {
+      for (const [i, s] of ranked.entries()) {
         const won = payout.get(s.squadId) ?? 0;
-        if (won > 0) adjustPoints(tx, s.userId, won, 'payout', lg.id);
-        tx.update(fantasySquads)
+        if (won > 0) await adjustPoints(tx, s.userId, won, 'payout', lg.id);
+        await tx
+          .update(fantasySquads)
           .set({ placement: i + 1, payout: won > 0 ? won : null })
-          .where(eq(fantasySquads.id, s.squadId))
-          .run();
-      });
-      tx.update(fantasyLeagues).set({ status: 'settled', settledAt: new Date() }).where(eq(fantasyLeagues.id, lg.id)).run();
+          .where(eq(fantasySquads.id, s.squadId));
+      }
+      await tx.update(fantasyLeagues).set({ status: 'settled', settledAt: new Date() }).where(eq(fantasyLeagues.id, lg.id));
     });
   }
-  return getLeague(lg.id)!;
+  return (await getLeague(lg.id))!;
 }
 
 // ---- views ----
@@ -531,19 +525,18 @@ export interface LeagueView {
   standings: Standing[];
 }
 
-export function getLeague(id: string): LeagueView | null {
-  const lg = row(id);
+export async function getLeague(id: string): Promise<LeagueView | null> {
+  const lg = await row(id);
   if (!lg) return null;
-  const squads = db.select().from(fantasySquads).where(eq(fantasySquads.leagueId, id)).all();
+  const squads = await db.select().from(fantasySquads).where(eq(fantasySquads.leagueId, id));
   const fixtures = liveFixtures();
 
-  const rows = squads.map((sq) => {
-    const handle = db.select({ handle: users.handle }).from(users).where(eq(users.id, sq.userId)).get()?.handle ?? '—';
-    const sp = db
+  const rows = await Promise.all(squads.map(async (sq) => {
+    const handle = (await db.select({ handle: users.handle }).from(users).where(eq(users.id, sq.userId)).limit(1))[0]?.handle ?? '—';
+    const sp = await db
       .select({ playerId: fantasySquadPlayers.playerId, starter: fantasySquadPlayers.starter, benchOrder: fantasySquadPlayers.benchOrder })
       .from(fantasySquadPlayers)
-      .where(eq(fantasySquadPlayers.squadId, sq.id))
-      .all();
+      .where(eq(fantasySquadPlayers.squadId, sq.id));
     const meta = new Map(sp.map((r) => [r.playerId, r]));
     const players = sp.map((r) => getPlayer(r.playerId)).filter((p): p is Player => !!p);
     const chip: Chip = sq.chip === 'tc' || sq.chip === 'bb' ? sq.chip : null;
@@ -596,7 +589,7 @@ export function getLeague(id: string): LeagueView | null {
       payoutTx: sq.payoutTx ?? null,
       players: standingPlayers,
     };
-  });
+  }));
 
   rows.sort((a, b) => b.points - a.points || a.budgetUsed - b.budgetUsed);
   const potBase = rows.reduce((a, s) => a + s.staked, 0); // base units (µUSD₮ for usdt)
@@ -627,37 +620,35 @@ export function getLeague(id: string): LeagueView | null {
   };
 }
 
-export function getLeagueByCode(code: string): LeagueView | null {
-  const lg = rowByCode(code);
+export async function getLeagueByCode(code: string): Promise<LeagueView | null> {
+  const lg = await rowByCode(code);
   return lg ? getLeague(lg.id) : null;
 }
 
-export function leaguesForUser(userId: string): LeagueView[] {
-  const asMember = db
+export async function leaguesForUser(userId: string): Promise<LeagueView[]> {
+  const memberRows = await db
     .select({ id: fantasySquads.leagueId })
     .from(fantasySquads)
-    .where(eq(fantasySquads.userId, userId))
-    .all()
-    .map((r) => r.id);
-  const rows = db
+    .where(eq(fantasySquads.userId, userId));
+  const asMember = memberRows.map((r) => r.id);
+  const rows = await db
     .select()
     .from(fantasyLeagues)
-    .where(or(eq(fantasyLeagues.creatorId, userId), asMember.length ? orIds(asMember) : eq(fantasyLeagues.id, '')))
-    .all();
+    .where(or(eq(fantasyLeagues.creatorId, userId), asMember.length ? orIds(asMember) : eq(fantasyLeagues.id, '')));
   const seen = new Set<string>();
-  return rows
+  const unique = rows
     .filter((r) => (seen.has(r.id) ? false : (seen.add(r.id), true)))
-    .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
-    .map((r) => getLeague(r.id)!)
-    .filter(Boolean);
+    .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+  const views = await Promise.all(unique.map((r) => getLeague(r.id)));
+  return views.filter((v): v is LeagueView => !!v);
 }
 
 // ---- internals ----
-function row(id: string) {
-  return db.select().from(fantasyLeagues).where(eq(fantasyLeagues.id, id)).get() ?? null;
+async function row(id: string) {
+  return (await db.select().from(fantasyLeagues).where(eq(fantasyLeagues.id, id)).limit(1))[0] ?? null;
 }
-function rowByCode(code: string) {
-  return db.select().from(fantasyLeagues).where(eq(fantasyLeagues.code, code.trim().toUpperCase())).get() ?? null;
+async function rowByCode(code: string) {
+  return (await db.select().from(fantasyLeagues).where(eq(fantasyLeagues.code, code.trim().toUpperCase())).limit(1))[0] ?? null;
 }
 function orIds(ids: string[]) {
   return or(...ids.map((id) => eq(fantasyLeagues.id, id)));

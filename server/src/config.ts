@@ -12,9 +12,24 @@
  * derived from the standard test mnemonic (so it's pre-funded with ETH).
  */
 
+import { existsSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+
 export type Mode = 'local' | 'testnet';
 
 export const MODE: Mode = (process.env.GAFFER_MODE as Mode) || 'local';
+
+/** Absolute path to the built SPA (Vite output). Served by Fastify in production. */
+export const WEB_DIST = fileURLToPath(new URL('../../web/dist', import.meta.url));
+
+/**
+ * Serve the web build from this server (single-service deploy). On by default
+ * whenever `web/dist` exists; force with GAFFER_SERVE_WEB=1/0. In local dev the
+ * build is absent, so we don't serve it — Vite's dev server + proxy is used.
+ */
+export const SERVE_WEB =
+  process.env.GAFFER_SERVE_WEB === '1' ||
+  (process.env.GAFFER_SERVE_WEB !== '0' && existsSync(`${WEB_DIST}/index.html`));
 
 /** Standard anvil/hardhat deterministic mnemonic — accounts are pre-funded with ETH. */
 export const TEST_MNEMONIC =
@@ -23,6 +38,9 @@ export const TEST_MNEMONIC =
 export const config = {
   mode: MODE,
   port: Number(process.env.PORT || 8787),
+  /** Serve the built SPA from this process (true in the single-service container). */
+  serveWeb: SERVE_WEB,
+  webDist: WEB_DIST,
   rpcUrl: process.env.GAFFER_RPC_URL || 'http://127.0.0.1:8545',
   chainId: Number(process.env.GAFFER_CHAIN_ID || (MODE === 'local' ? 31337 : 11155111)),
   usdtDecimals: 6,

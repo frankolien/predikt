@@ -12,7 +12,7 @@ import { autoDraft, validateEntry } from './store.js';
 import { scoreLineup, type LineupPlayer, type ScoreFixture } from './scoring.js';
 import type { Position } from './players.js';
 
-initDb();
+await initDb();
 let failures = 0;
 const check = (label: string, cond: boolean, extra?: unknown) => {
   console.log(`${cond ? '✅' : '❌'} ${label}`, extra ?? '');
@@ -73,9 +73,9 @@ check('bench players contribute (>0)', benchBase > 0, benchBase);
 
 // B) league: 3 managers autodraft-join & pay, settle winner-take-all, pot conserved
 console.log('\n— league (buy-in + settle) —');
-const mgrs = ['ana', 'ben', 'cid'].map((h) => createAccount(h));
+const mgrs = await Promise.all(['ana', 'ben', 'cid'].map((h) => createAccount(h)));
 const creator = mgrs[0].account.id;
-let lg = fantasy.createLeague({ creatorId: creator, name: 'Smoke League', buyIn: 100, splitBps: [10000] });
+let lg = await fantasy.createLeague({ creatorId: creator, name: 'Smoke League', buyIn: 100, splitBps: [10000] });
 for (const m of mgrs) {
   const draft = autoDraft();
   lg = await fantasy.joinLeague({ leagueId: lg.id, userId: m.account.id, squadIds: draft.squadIds, starterIds: draft.starterIds, captainId: draft.captainId, viceId: draft.viceId });
@@ -84,13 +84,18 @@ check('3 managers joined', lg.memberCount === 3, lg.memberCount);
 check('pot = 300', lg.pot === 300, lg.pot);
 check('each squad stores 15 players', lg.standings.every((s) => s.players.length === 15), lg.standings.map((s) => s.players.length).join(','));
 check('each squad has a formation + vice', lg.standings.every((s) => !!s.formation && !!s.viceCaptainId));
-const afterJoin = mgrs.reduce((a, m) => a + getAccount(m.account.id)!.points, 0);
+const balSum = async () => {
+  let sum = 0;
+  for (const m of mgrs) sum += (await getAccount(m.account.id))!.points;
+  return sum;
+};
+const afterJoin = await balSum();
 check('each debited 100 (sum = 2700)', afterJoin === 2700, afterJoin);
 
-lg = fantasy.startLeague({ leagueId: lg.id, creatorId: creator });
+lg = await fantasy.startLeague({ leagueId: lg.id, creatorId: creator });
 lg = await fantasy.settleLeague({ leagueId: lg.id, creatorId: creator });
 check('league settled', lg.status === 'settled', lg.status);
-const totalPoints = mgrs.reduce((a, m) => a + getAccount(m.account.id)!.points, 0);
+const totalPoints = await balSum();
 check('points conserved (3×1000 = 3000)', totalPoints === 3000, totalPoints);
 const winner = lg.standings.find((s) => s.placement === 1)!;
 check('winner paid the whole pot (300)', winner.payout === 300, `${winner.handle} +${winner.payout}`);

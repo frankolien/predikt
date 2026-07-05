@@ -31,8 +31,8 @@ export interface WalletAuthResult {
   isNew: boolean;
 }
 
-function userByAddress(address: string) {
-  return db.select().from(users).where(eq(users.walletAddress, address)).get();
+async function userByAddress(address: string) {
+  return (await db.select().from(users).where(eq(users.walletAddress, address)).limit(1))[0];
 }
 
 /** A friendly default handle when the user doesn't pick one. */
@@ -42,17 +42,17 @@ function defaultHandle(handle: string | undefined, address: string): string {
 }
 
 /** Insert a new user row + signup-bonus ledger entry, keyed to a wallet address. */
-function insertUser(address: string, handle?: string): Account {
+async function insertUser(address: string, handle?: string): Promise<Account> {
   const id = randomUUID();
   const now = new Date();
   const name = defaultHandle(handle, address);
-  db.transaction((tx) => {
-    tx.insert(users)
-      .values({ id, handle: name, points: SIGNUP_BONUS, walletAddress: address, createdAt: now })
-      .run();
-    tx.insert(pointsLedger)
-      .values({ id: randomUUID(), userId: id, delta: SIGNUP_BONUS, reason: 'signup', createdAt: now })
-      .run();
+  await db.transaction(async (tx) => {
+    await tx
+      .insert(users)
+      .values({ id, handle: name, points: SIGNUP_BONUS, walletAddress: address, createdAt: now });
+    await tx
+      .insert(pointsLedger)
+      .values({ id: randomUUID(), userId: id, delta: SIGNUP_BONUS, reason: 'signup', createdAt: now });
   });
   return { id, handle: name, points: SIGNUP_BONUS };
 }
@@ -67,23 +67,23 @@ export async function createWalletAccount(handle?: string): Promise<WalletAuthRe
   const address = fan.address;
 
   // Astronomically unlikely, but if this address already has an account, resume it.
-  const existing = userByAddress(address);
+  const existing = await userByAddress(address);
   if (existing) {
     return {
       account: { id: existing.id, handle: existing.handle, points: existing.points },
-      token: issueSession(existing.id),
+      token: await issueSession(existing.id),
       wallet: { address, backend: fan.backend, usdtHuman: await manager.walletBalance(address) },
       isNew: false,
     };
   }
 
-  const account = insertUser(address, handle);
+  const account = await insertUser(address, handle);
   // Slow chain work (gas + mint) off the request path — balance shows 0 → funds land shortly.
   void manager.fundWallet(address).catch((e) => console.warn(`[auth] fundWallet ${address} failed:`, (e as Error).message));
 
   return {
     account,
-    token: issueSession(account.id),
+    token: await issueSession(account.id),
     wallet: { address, backend: fan.backend, usdtHuman: 0 },
     mnemonic: fan.mnemonic,
     isNew: true,
@@ -102,22 +102,22 @@ export async function signInWithMnemonic(mnemonic: string, handle?: string): Pro
   const imported = await manager.importWallet(mnemonic, defaultHandle(handle, '0x0000'));
   const address = imported.address;
 
-  const existing = userByAddress(address);
+  const existing = await userByAddress(address);
   if (existing) {
     return {
       account: { id: existing.id, handle: existing.handle, points: existing.points },
-      token: issueSession(existing.id),
+      token: await issueSession(existing.id),
       wallet: { address, backend: imported.backend, usdtHuman: imported.usdtHuman },
       isNew: false,
     };
   }
 
   // Valid phrase we've never seen → adopt it as a new account.
-  const account = insertUser(address, handle);
+  const account = await insertUser(address, handle);
   void manager.fundWallet(address).catch(() => {});
   return {
     account,
-    token: issueSession(account.id),
+    token: await issueSession(account.id),
     wallet: { address, backend: imported.backend, usdtHuman: imported.usdtHuman },
     isNew: true,
   };

@@ -1,6 +1,6 @@
 /**
- * USD₮ cup end-to-end (real on-chain) — needs anvil.
- *   npx tsx src/organize/organize.usdt.smoke.ts
+ * USD₮ cup end-to-end (real on-chain) — needs anvil + a Postgres.
+ *   DATABASE_URL=… npx tsx src/organize/organize.usdt.smoke.ts
  * Links WDK wallets, joins a USD₮ cup (real deposits), settles (real payouts),
  * and checks balances, tx hashes, and conservation.
  */
@@ -11,7 +11,7 @@ import { linkWallet, balanceOf, walletAddressOf } from '../store/wallets.js';
 import * as manager from '../pool/manager.js';
 import * as org from './store.js';
 
-initDb();
+await initDb();
 await manager.init();
 
 let failures = 0;
@@ -20,14 +20,14 @@ const check = (l: string, c: boolean, e?: unknown) => {
   if (!c) failures++;
 };
 
-const players = ['ana', 'ben', 'cid', 'dee'].map((h) => createAccount(h).account.id);
+const players = await Promise.all(['ana', 'ben', 'cid', 'dee'].map(async (h) => (await createAccount(h)).account.id));
 for (const id of players) await linkWallet(id); // WDK wallet + 100 USD₮ each
-const addrs = players.map((id) => walletAddressOf(id)!);
+const addrs = await Promise.all(players.map(async (id) => (await walletAddressOf(id))!));
 const bals = async () => Promise.all(addrs.map((a) => balanceOf(a).then(Math.round)));
 console.log('start balances:', await bals());
 
 const creator = players[0];
-let t = org.createTournament({ organizerId: creator, name: 'USD₮ Cup', maxPlayers: 4, entryFee: 5, currency: 'usdt', splitBps: [10000] });
+let t = await org.createTournament({ organizerId: creator, name: 'USD₮ Cup', maxPlayers: 4, entryFee: 5, currency: 'usdt', splitBps: [10000] });
 check('currency = usdt', t.currency === 'usdt', t.currency);
 check('entry fee display = 5', t.entryFee === 5, t.entryFee);
 
@@ -37,16 +37,16 @@ check('pot display = 20', t.pot === 20, t.pot);
 check('all deposits have tx hashes', t.participants.every((p) => !!p.depositTx), t.participants.map((p) => p.depositTx?.slice(0, 8)));
 check('each debited 5 USD₮ → 95', (await bals()).every((b) => b === 95), await bals());
 
-t = org.startTournament({ tournamentId: t.id, organizerId: creator });
+t = await org.startTournament({ tournamentId: t.id, organizerId: creator });
 async function playOut() {
   for (let g = 0; g < 40; g++) {
-    const cur = org.getTournament(t.id)!;
+    const cur = (await org.getTournament(t.id))!;
     if (cur.status !== 'live') return cur;
     const rd = cur.rounds.flatMap((r) => r.matches).find((m) => m.status === 'ready' && m.home.participantId && m.away.participantId);
     if (!rd) return cur;
     await org.reportMatch({ tournamentId: t.id, matchId: rd.id, organizerId: creator, homeScore: 2, awayScore: 1 });
   }
-  return org.getTournament(t.id)!;
+  return (await org.getTournament(t.id))!;
 }
 t = await playOut();
 check('completed', t.status === 'completed', t.status);

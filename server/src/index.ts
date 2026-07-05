@@ -15,17 +15,22 @@ import { startAutoSettle } from './store/autosettle.js';
 import { ensurePool } from './fantasy/squads.js';
 
 // Free-to-play data layer (accounts, points, pools). Independent of the chain.
-initDb();
+await initDb();
 startAutoSettle(); // points pools pay out from the live feed at full time
 ensurePool().catch(() => {}); // warm the fantasy pool from real WC squads (falls back offline)
 
 const app = buildApp();
 
-await app.listen({ port: config.port, host: '127.0.0.1' });
+// Bind all interfaces: in a container (Railway) the platform reaches us from
+// outside localhost, and $PORT is injected. Locally this is still 127.0.0.1-reachable.
+const host = process.env.HOST || '0.0.0.0';
+await app.listen({ port: config.port, host });
 
+const shown = host === '0.0.0.0' ? '127.0.0.1' : host;
 console.log('');
 console.log('  🏴  Gaffer — your keys, your model, your call');
-console.log(`  ├─ API      http://127.0.0.1:${config.port}`);
+console.log(`  ├─ API      http://${shown}:${config.port}`);
+console.log(`  ├─ web      served from ${config.serveWeb ? 'web/dist (same origin)' : 'vite dev (proxy)'}`);
 console.log(`  ├─ mode     ${config.mode}`);
 console.log(`  ├─ chain    ${config.rpcUrl} (chainId ${config.chainId})`);
 console.log('  └─ booting  deploying contracts + loading on-device model…');

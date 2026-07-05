@@ -63,8 +63,8 @@ function trophyPrompt(name: string, champion: string, runnerUp: string, potLabel
 }
 
 /** Build the prompt for a given beat from live bracket state. */
-function buildPrompt(tournamentId: string, kind: DirectorKind, matchId?: string): ChatMessage[] {
-  const t = getTournament(tournamentId);
+async function buildPrompt(tournamentId: string, kind: DirectorKind, matchId?: string): Promise<ChatMessage[]> {
+  const t = await getTournament(tournamentId);
   if (!t) throw new Error('tournament not found');
 
   if (kind === 'draw') {
@@ -99,7 +99,7 @@ export async function* streamDirector(
 ): AsyncGenerator<DirectorEvent> {
   let prompt: ChatMessage[];
   try {
-    prompt = buildPrompt(tournamentId, kind, matchId);
+    prompt = await buildPrompt(tournamentId, kind, matchId);
   } catch (err) {
     yield { type: 'error', message: (err as Error).message };
     return;

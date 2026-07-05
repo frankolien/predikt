@@ -1,11 +1,15 @@
 /**
- * Points-based prediction pools (DB-backed, free-to-play).
+ * Prediction pools (Postgres-backed, free-to-play + real USD₮).
  *
  * Mirrors the on-chain pool semantics — fixed buy-in, join with a scoreline,
  * settle pro-rata to correct-outcome callers. Free-to-play pools run in POINTS
  * (zero wallet/gas friction); `currency='usdt'` runs the identical flow through
  * real on-chain USD₮ via the shared treasury escrow. Settlement reuses the same
  * pure math (`computeSettlement`) in the currency's base unit either way.
+ *
+ * NOTE: with postgres-js a transaction runs on its OWN connection (the `tx`
+ * handle), so every write inside `db.transaction` MUST use `tx` — a `db.*` call
+ * there would run on a different pooled connection, outside the transaction.
  */
 import { randomUUID } from 'node:crypto';
 import { and, desc, eq } from 'drizzle-orm';
@@ -41,7 +45,7 @@ function defaultName(fixtureId: string): string {
   return `${getTeam(fx.homeTeamId).name} v ${getTeam(fx.awayTeamId).name}`;
 }
 
-export function createPool(opts: {
+export async function createPool(opts: {
   creatorId: string;
   fixtureId: string;
   name?: string;
@@ -60,27 +64,25 @@ export function createPool(opts: {
 
   let code = inviteCode();
   for (let i = 0; i < 4; i++) {
-    const clash = db.select({ id: pools.id }).from(pools).where(eq(pools.code, code)).get();
+    const clash = (await db.select({ id: pools.id }).from(pools).where(eq(pools.code, code)).limit(1))[0];
     if (!clash) break;
     code = inviteCode();
   }
 
-  db.insert(pools)
-    .values({
-      id,
-      code,
-      name,
-      fixtureId: opts.fixtureId,
-      creatorId: opts.creatorId,
-      buyIn,
-      currency,
-      isPublic: opts.isPublic ?? false,
-      status: 'open',
-      lockTime,
-      createdAt: now,
-    })
-    .run();
-  return getPool(id)!;
+  await db.insert(pools).values({
+    id,
+    code,
+    name,
+    fixtureId: opts.fixtureId,
+    creatorId: opts.creatorId,
+    buyIn,
+    currency,
+    isPublic: opts.isPublic ?? false,
+    status: 'open',
+    lockTime,
+    createdAt: now,
+  });
+  return (await getPool(id))!;
 }
 
 export async function joinPool(opts: {
@@ -90,61 +92,57 @@ export async function joinPool(opts: {
   predHome: number;
   predAway: number;
 }) {
-  const pool = opts.poolId ? poolRow(opts.poolId) : opts.code ? poolByCode(opts.code) : null;
+  const pool = opts.poolId ? await poolRow(opts.poolId) : opts.code ? await poolByCode(opts.code) : null;
   if (!pool) throw new Error('pool not found');
   if (pool.status !== 'open') throw new Error('pool is closed');
   if (pool.lockTime && pool.lockTime.getTime() <= Date.now()) throw new Error('pool locked — the tie kicked off');
-  const dup = db
-    .select({ id: poolMembers.id })
-    .from(poolMembers)
-    .where(and(eq(poolMembers.poolId, pool.id), eq(poolMembers.userId, opts.userId)))
-    .get();
+  const dup = (
+    await db
+      .select({ id: poolMembers.id })
+      .from(poolMembers)
+      .where(and(eq(poolMembers.poolId, pool.id), eq(poolMembers.userId, opts.userId)))
+      .limit(1)
+  )[0];
   if (dup) throw new Error('you have already joined this pool');
 
   const predHome = clampGoals(opts.predHome);
   const predAway = clampGoals(opts.predAway);
-
-  // Insert the entry; joins the active BEGIN/COMMIT when called inside a
-  // transaction (points), or runs standalone on the USD₮ path.
-  const writeEntry = (depositTx?: string) =>
-    db
-      .insert(poolMembers)
-      .values({
-        id: randomUUID(),
-        poolId: pool.id,
-        userId: opts.userId,
-        predHome,
-        predAway,
-        staked: pool.buyIn,
-        depositTx,
-        joinedAt: new Date(),
-      })
-      .run();
+  const entry = {
+    id: randomUUID(),
+    poolId: pool.id,
+    userId: opts.userId,
+    predHome,
+    predAway,
+    staked: pool.buyIn,
+    joinedAt: new Date(),
+  };
 
   if (pool.currency === 'usdt') {
     let depositTx: string | undefined;
     if (pool.buyIn > 0) {
-      const addr = walletAddressOf(opts.userId);
+      const addr = await walletAddressOf(opts.userId);
       if (!addr) throw new Error('connect a USD₮ wallet first');
-      depositTx = await escrow.collect(addr, BigInt(pool.buyIn)); // real USD₮ → treasury
+      depositTx = await escrow.collect(addr, BigInt(pool.buyIn)); // real USD₮ → treasury (before we open a txn)
     }
-    writeEntry(depositTx);
+    await db.transaction(async (tx) => {
+      await tx.insert(poolMembers).values({ ...entry, depositTx });
+    });
   } else {
-    db.transaction((tx) => {
-      adjustPoints(tx, opts.userId, -pool.buyIn, 'stake', pool.id); // throws if insufficient
-      writeEntry();
+    await db.transaction(async (tx) => {
+      await adjustPoints(tx, opts.userId, -pool.buyIn, 'stake', pool.id); // throws if insufficient
+      await tx.insert(poolMembers).values(entry);
     });
   }
-  return getPool(pool.id)!;
+  return (await getPool(pool.id))!;
 }
 
 /** Settle a pool on a final score: pay pro-rata to correct-outcome callers. */
 export async function settlePool(poolId: string, result: MatchResult) {
-  const pool = poolRow(poolId);
+  const pool = await poolRow(poolId);
   if (!pool) throw new Error('pool not found');
   if (pool.status === 'settled') throw new Error('pool already settled');
 
-  const members = db.select().from(poolMembers).where(eq(poolMembers.poolId, poolId)).all();
+  const members = await db.select().from(poolMembers).where(eq(poolMembers.poolId, poolId));
   const entries = members.map((m) => ({
     address: m.userId,
     displayName: m.userId,
@@ -165,45 +163,45 @@ export async function settlePool(poolId: string, result: MatchResult) {
       const won = !!p?.won;
       let payoutTx: string | undefined;
       if (winnings > 0) {
-        const addr = walletAddressOf(m.userId);
+        const addr = await walletAddressOf(m.userId);
         if (addr) payoutTx = await escrow.pay(addr, BigInt(winnings)); // real USD₮ → winner
       }
-      db.update(poolMembers)
+      await db
+        .update(poolMembers)
         .set({ won, winnings, payoutTx, exact: !!p?.exactScore })
-        .where(eq(poolMembers.id, m.id))
-        .run();
+        .where(eq(poolMembers.id, m.id));
     }
-    db.update(pools)
+    await db
+      .update(pools)
       .set({ status: 'settled', resultHome: result.homeGoals, resultAway: result.awayGoals, settledAt: new Date() })
-      .where(eq(pools.id, poolId))
-      .run();
+      .where(eq(pools.id, poolId));
   } else {
-    db.transaction((tx) => {
+    await db.transaction(async (tx) => {
       for (const m of members) {
         const p = byUser.get(m.userId);
         const winnings = p ? Math.round(p.amount) : 0;
         const won = !!p?.won;
-        if (winnings > 0) adjustPoints(tx, m.userId, winnings, settlement.refunded ? 'refund' : 'payout', poolId);
-        tx.update(poolMembers)
+        if (winnings > 0) await adjustPoints(tx, m.userId, winnings, settlement.refunded ? 'refund' : 'payout', poolId);
+        await tx
+          .update(poolMembers)
           .set({ won, winnings, exact: !!p?.exactScore })
-          .where(eq(poolMembers.id, m.id))
-          .run();
+          .where(eq(poolMembers.id, m.id));
       }
-      tx.update(pools)
+      await tx
+        .update(pools)
         .set({ status: 'settled', resultHome: result.homeGoals, resultAway: result.awayGoals, settledAt: new Date() })
-        .where(eq(pools.id, poolId))
-        .run();
+        .where(eq(pools.id, poolId));
     });
   }
-  return getPool(poolId)!;
+  return (await getPool(poolId))!;
 }
 
 // ---- views ----
 
-export function getPool(id: string) {
-  const pool = poolRow(id);
+export async function getPool(id: string) {
+  const pool = await poolRow(id);
   if (!pool) return null;
-  const rows = db
+  const rows = await db
     .select({
       userId: poolMembers.userId,
       handle: users.handle,
@@ -220,8 +218,7 @@ export function getPool(id: string) {
     .from(poolMembers)
     .innerJoin(users, eq(poolMembers.userId, users.id))
     .where(eq(poolMembers.poolId, id))
-    .orderBy(poolMembers.joinedAt)
-    .all();
+    .orderBy(poolMembers.joinedAt);
 
   const potBase = rows.reduce((a, m) => a + m.staked, 0); // base units (µUSD₮ for usdt)
   const disp = (n: number) => toDisplay(n, pool.currency);
@@ -253,46 +250,45 @@ export function getPool(id: string) {
   };
 }
 
-export function getPoolByCode(code: string) {
-  const p = poolByCode(code);
+export async function getPoolByCode(code: string) {
+  const p = await poolByCode(code);
   return p ? getPool(p.id) : null;
 }
 
 /** Pools a user belongs to (most recent first). */
-export function poolsForUser(userId: string) {
-  const rows = db
+export async function poolsForUser(userId: string) {
+  const rows = await db
     .select({ poolId: poolMembers.poolId })
     .from(poolMembers)
-    .where(eq(poolMembers.userId, userId))
-    .all();
-  return rows.map((r) => getPool(r.poolId)).filter(Boolean);
+    .where(eq(poolMembers.userId, userId));
+  const views = await Promise.all(rows.map((r) => getPool(r.poolId)));
+  return views.filter(Boolean);
 }
 
 /** Open public pools for a fixture (for discovery / "join a pool"). */
-export function publicPoolsForFixture(fixtureId: string) {
-  const rows = db
+export async function publicPoolsForFixture(fixtureId: string) {
+  const rows = await db
     .select({ id: pools.id })
     .from(pools)
     .where(and(eq(pools.fixtureId, fixtureId), eq(pools.isPublic, true)))
-    .orderBy(desc(pools.createdAt))
-    .all();
-  return rows.map((r) => getPool(r.id)).filter(Boolean);
+    .orderBy(desc(pools.createdAt));
+  const views = await Promise.all(rows.map((r) => getPool(r.id)));
+  return views.filter(Boolean);
 }
 
 /** Open pools for a fixture — used by the auto-settle watcher. */
-export function openPoolsForFixture(fixtureId: string) {
+export async function openPoolsForFixture(fixtureId: string) {
   return db
     .select({ id: pools.id, code: pools.code })
     .from(pools)
-    .where(and(eq(pools.fixtureId, fixtureId), eq(pools.status, 'open')))
-    .all();
+    .where(and(eq(pools.fixtureId, fixtureId), eq(pools.status, 'open')));
 }
 
 // ---- internals ----
 
-function poolRow(id: string) {
-  return db.select().from(pools).where(eq(pools.id, id)).get() ?? null;
+async function poolRow(id: string) {
+  return (await db.select().from(pools).where(eq(pools.id, id)).limit(1))[0] ?? null;
 }
-function poolByCode(code: string) {
-  return db.select().from(pools).where(eq(pools.code, code.toUpperCase())).get() ?? null;
+async function poolByCode(code: string) {
+  return (await db.select().from(pools).where(eq(pools.code, code.toUpperCase())).limit(1))[0] ?? null;
 }

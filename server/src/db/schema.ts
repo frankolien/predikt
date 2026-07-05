@@ -1,15 +1,19 @@
 /**
- * Gaffer v1 data model — free-to-play prediction game (points, not money).
+ * Gaffer v1 data model — free-to-play prediction game (points) + real USD₮.
  *
- * The chain/WDK layer is parked as the future real-money tier; the live product
- * runs on this relational model so pools, leagues, points and history survive
- * restarts and support real accounts. SQLite for local dev → Postgres at deploy
- * (Drizzle keeps the schema portable).
+ * Postgres (Drizzle). Money amounts (buy-ins/pots/payouts) are stored as BIGINT
+ * because USD₮ is tracked in µUSD₮ (×1e6) and would overflow a 32-bit int; plain
+ * counters (points, scores, ranks) stay INTEGER. Timestamps are timestamptz.
  */
-import { sqliteTable, text, integer, index, uniqueIndex } from 'drizzle-orm/sqlite-core';
+import { pgTable, text, integer, bigint, boolean, timestamp, index, uniqueIndex } from 'drizzle-orm/pg-core';
+
+// Shared column builders — a timestamptz that maps to a JS Date, and a money
+// column (BIGINT as number: whole points, or µUSD₮ ×1e6 for real USD₮).
+const ts = (name: string) => timestamp(name, { withTimezone: true, mode: 'date' });
+const money = (name: string) => bigint(name, { mode: 'number' });
 
 /** Free-to-play accounts. Everyone starts with a points balance; no money. */
-export const users = sqliteTable(
+export const users = pgTable(
   'users',
   {
     id: text('id').primaryKey(), // uuid
@@ -18,15 +22,15 @@ export const users = sqliteTable(
     avatar: text('avatar'),
     walletAddress: text('wallet_address'), // linked self-custodial USD₮ wallet (WDK)
     points: integer('points').notNull().default(1000), // free starting balance
-    createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+    createdAt: ts('created_at').notNull(),
   },
   (t) => ({
-    emailIdx: uniqueIndex('users_email_idx').on(t.email), // NULLs are distinct in SQLite
+    emailIdx: uniqueIndex('users_email_idx').on(t.email), // NULLs are distinct
   }),
 );
 
 /** A prediction pool for one fixture, joinable by short invite code. */
-export const pools = sqliteTable(
+export const pools = pgTable(
   'pools',
   {
     id: text('id').primaryKey(),
@@ -36,17 +40,17 @@ export const pools = sqliteTable(
     creatorId: text('creator_id')
       .notNull()
       .references(() => users.id),
-    buyIn: integer('buy_in').notNull().default(50), // points, or µUSD₮ when currency='usdt'
+    buyIn: money('buy_in').notNull().default(50), // points, or µUSD₮ when currency='usdt'
     currency: text('currency', { enum: ['points', 'usdt'] }).notNull().default('points'),
-    isPublic: integer('is_public', { mode: 'boolean' }).notNull().default(false),
+    isPublic: boolean('is_public').notNull().default(false),
     status: text('status', { enum: ['open', 'locked', 'settled'] })
       .notNull()
       .default('open'),
-    lockTime: integer('lock_time', { mode: 'timestamp_ms' }), // kickoff — no entries after
+    lockTime: ts('lock_time'), // kickoff — no entries after
     resultHome: integer('result_home'),
     resultAway: integer('result_away'),
-    createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
-    settledAt: integer('settled_at', { mode: 'timestamp_ms' }),
+    createdAt: ts('created_at').notNull(),
+    settledAt: ts('settled_at'),
   },
   (t) => ({
     codeIdx: uniqueIndex('pools_code_idx').on(t.code),
@@ -56,7 +60,7 @@ export const pools = sqliteTable(
 );
 
 /** A user's entry in a pool — their prediction + staked points. */
-export const poolMembers = sqliteTable(
+export const poolMembers = pgTable(
   'pool_members',
   {
     id: text('id').primaryKey(),
@@ -68,14 +72,14 @@ export const poolMembers = sqliteTable(
       .references(() => users.id),
     predHome: integer('pred_home').notNull(),
     predAway: integer('pred_away').notNull(),
-    staked: integer('staked').notNull(), // points, or µUSD₮ when the pool is usdt
+    staked: money('staked').notNull(), // points, or µUSD₮ when the pool is usdt
     depositTx: text('deposit_tx'), // USD₮ buy-in tx hash
     // Filled at settlement:
-    won: integer('won', { mode: 'boolean' }),
-    winnings: integer('winnings'),
+    won: boolean('won'),
+    winnings: money('winnings'),
     payoutTx: text('payout_tx'), // USD₮ payout tx hash
-    exact: integer('exact', { mode: 'boolean' }),
-    joinedAt: integer('joined_at', { mode: 'timestamp_ms' }).notNull(),
+    exact: boolean('exact'),
+    joinedAt: ts('joined_at').notNull(),
   },
   (t) => ({
     uniqMember: uniqueIndex('pool_members_uniq').on(t.poolId, t.userId), // one entry per user per pool
@@ -85,17 +89,17 @@ export const poolMembers = sqliteTable(
 );
 
 /** Immutable audit trail of every points balance change. */
-export const pointsLedger = sqliteTable(
+export const pointsLedger = pgTable(
   'points_ledger',
   {
     id: text('id').primaryKey(),
     userId: text('user_id')
       .notNull()
       .references(() => users.id),
-    delta: integer('delta').notNull(), // +credit / -debit
+    delta: integer('delta').notNull(), // +credit / -debit (points only)
     reason: text('reason', { enum: ['signup', 'stake', 'payout', 'refund', 'bonus'] }).notNull(),
     poolId: text('pool_id'),
-    createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+    createdAt: ts('created_at').notNull(),
   },
   (t) => ({
     userIdx: index('points_ledger_user_idx').on(t.userId),
@@ -103,15 +107,15 @@ export const pointsLedger = sqliteTable(
 );
 
 /** Lightweight session tokens now; swap the issuer for magic-link auth at launch. */
-export const sessions = sqliteTable(
+export const sessions = pgTable(
   'sessions',
   {
     token: text('token').primaryKey(),
     userId: text('user_id')
       .notNull()
       .references(() => users.id),
-    createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
-    expiresAt: integer('expires_at', { mode: 'timestamp_ms' }).notNull(),
+    createdAt: ts('created_at').notNull(),
+    expiresAt: ts('expires_at').notNull(),
   },
   (t) => ({
     userIdx: index('sessions_user_idx').on(t.userId),
@@ -123,11 +127,11 @@ export const sessions = sqliteTable(
    set an entry fee, invite players by code, the Gaffer seeds + narrates the
    draw, scores advance the bracket live, and the pot auto-pays the winners.
    Same buy-in/settlement discipline as pools — entry debits, payout credits,
-   every move on the points ledger. `currency` flips points → USD₮ (WDK) later.
+   every move on the points ledger. `currency` flips points → USD₮ (WDK).
    ============================================================================ */
 
 /** A knockout tournament. Pot = sum of paid entries; split by `splitBps`. */
-export const tournaments = sqliteTable(
+export const tournaments = pgTable(
   'tournaments',
   {
     id: text('id').primaryKey(),
@@ -140,14 +144,14 @@ export const tournaments = sqliteTable(
     organizerId: text('organizer_id')
       .notNull()
       .references(() => users.id),
-    entryFee: integer('entry_fee').notNull().default(0), // points (or µUSD₮ when currency='usdt')
+    entryFee: money('entry_fee').notNull().default(0), // points (or µUSD₮ when currency='usdt')
     currency: text('currency', { enum: ['points', 'usdt'] }).notNull().default('points'),
     maxPlayers: integer('max_players').notNull().default(8), // bracket cap (4/8/16)
     splitBps: text('split_bps').notNull().default('[10000]'), // JSON basis-points per placement
     winnerId: text('winner_id'), // participant id of the champion
-    createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
-    startedAt: integer('started_at', { mode: 'timestamp_ms' }),
-    completedAt: integer('completed_at', { mode: 'timestamp_ms' }),
+    createdAt: ts('created_at').notNull(),
+    startedAt: ts('started_at'),
+    completedAt: ts('completed_at'),
   },
   (t) => ({
     codeIdx: uniqueIndex('tournaments_code_idx').on(t.code),
@@ -156,7 +160,7 @@ export const tournaments = sqliteTable(
 );
 
 /** An entrant. Either a real user (pays the entry) or an organizer-added name. */
-export const tournamentParticipants = sqliteTable(
+export const tournamentParticipants = pgTable(
   'tournament_participants',
   {
     id: text('id').primaryKey(),
@@ -169,12 +173,12 @@ export const tournamentParticipants = sqliteTable(
     status: text('status', { enum: ['active', 'eliminated', 'champion', 'withdrawn'] })
       .notNull()
       .default('active'),
-    staked: integer('staked').notNull().default(0), // points, or µUSD₮ when currency='usdt'
+    staked: money('staked').notNull().default(0), // points, or µUSD₮ when currency='usdt'
     depositTx: text('deposit_tx'), // USD₮ buy-in tx hash
     placement: integer('placement'), // 1 = champion, 2 = runner-up, …
-    payout: integer('payout'),
+    payout: money('payout'),
     payoutTx: text('payout_tx'), // USD₮ payout tx hash
-    joinedAt: integer('joined_at', { mode: 'timestamp_ms' }).notNull(),
+    joinedAt: ts('joined_at').notNull(),
   },
   (t) => ({
     tourIdx: index('tp_tour_idx').on(t.tournamentId),
@@ -184,7 +188,7 @@ export const tournamentParticipants = sqliteTable(
 );
 
 /** One tie in the bracket. `nextMatchId`/`nextSlot` wire the winner forward. */
-export const tournamentMatches = sqliteTable(
+export const tournamentMatches = pgTable(
   'tournament_matches',
   {
     id: text('id').primaryKey(),
@@ -204,7 +208,7 @@ export const tournamentMatches = sqliteTable(
       .default('pending'),
     nextMatchId: text('next_match_id'),
     nextSlot: text('next_slot', { enum: ['home', 'away'] }),
-    createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+    createdAt: ts('created_at').notNull(),
   },
   (t) => ({
     tourIdx: index('tm_tour_idx').on(t.tournamentId),
@@ -218,7 +222,7 @@ export const tournamentMatches = sqliteTable(
    discipline as pools + cups. Player pool is static (fantasy/players.ts).
    ============================================================================ */
 
-export const fantasyLeagues = sqliteTable(
+export const fantasyLeagues = pgTable(
   'fantasy_leagues',
   {
     id: text('id').primaryKey(),
@@ -227,13 +231,13 @@ export const fantasyLeagues = sqliteTable(
     creatorId: text('creator_id')
       .notNull()
       .references(() => users.id),
-    buyIn: integer('buy_in').notNull().default(0),
+    buyIn: money('buy_in').notNull().default(0),
     currency: text('currency', { enum: ['points', 'usdt'] }).notNull().default('points'),
     splitBps: text('split_bps').notNull().default('[10000]'),
     status: text('status', { enum: ['open', 'live', 'settled'] }).notNull().default('open'),
-    createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
-    lockedAt: integer('locked_at', { mode: 'timestamp_ms' }),
-    settledAt: integer('settled_at', { mode: 'timestamp_ms' }),
+    createdAt: ts('created_at').notNull(),
+    lockedAt: ts('locked_at'),
+    settledAt: ts('settled_at'),
   },
   (t) => ({
     codeIdx: uniqueIndex('fantasy_leagues_code_idx').on(t.code),
@@ -242,7 +246,7 @@ export const fantasyLeagues = sqliteTable(
 );
 
 /** One manager's entry in a league — their XI + captain + staked buy-in. */
-export const fantasySquads = sqliteTable(
+export const fantasySquads = pgTable(
   'fantasy_squads',
   {
     id: text('id').primaryKey(),
@@ -256,12 +260,12 @@ export const fantasySquads = sqliteTable(
     viceCaptainPlayerId: text('vice_captain_player_id'), // FPL vice — takes the armband if the captain's team doesn't feature
     chip: text('chip'), // null | 'tc' (Triple Captain) | 'bb' (Bench Boost)
     budgetUsed: integer('budget_used').notNull().default(0), // ×10 (one dp) to stay integer
-    staked: integer('staked').notNull().default(0), // points, or µUSD₮ when currency='usdt'
+    staked: money('staked').notNull().default(0), // points, or µUSD₮ when currency='usdt'
     depositTx: text('deposit_tx'),
     placement: integer('placement'),
-    payout: integer('payout'),
+    payout: money('payout'),
     payoutTx: text('payout_tx'),
-    createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+    createdAt: ts('created_at').notNull(),
   },
   (t) => ({
     leagueIdx: index('fantasy_squads_league_idx').on(t.leagueId),
@@ -270,7 +274,7 @@ export const fantasySquads = sqliteTable(
   }),
 );
 
-export const fantasySquadPlayers = sqliteTable(
+export const fantasySquadPlayers = pgTable(
   'fantasy_squad_players',
   {
     id: text('id').primaryKey(),

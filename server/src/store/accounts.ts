@@ -1,5 +1,5 @@
 /**
- * Free-to-play accounts + points balances (DB-backed).
+ * Free-to-play accounts + points balances (Postgres-backed).
  *
  * Every balance change goes through `adjustPoints`, which writes an immutable
  * ledger row in the same transaction — so a user's points are always the exact
@@ -23,70 +23,69 @@ export interface Account {
 /** The transaction handle passed into `db.transaction(tx => …)`. */
 export type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
-export function createAccount(handle: string): { account: Account; token: string } {
+export async function createAccount(handle: string): Promise<{ account: Account; token: string }> {
   const id = randomUUID();
   const now = new Date();
   const name = (handle || 'Anon').toString().trim().slice(0, 40) || 'Anon';
-  db.transaction((tx) => {
-    tx.insert(users).values({ id, handle: name, points: SIGNUP_BONUS, createdAt: now }).run();
-    tx.insert(pointsLedger)
-      .values({ id: randomUUID(), userId: id, delta: SIGNUP_BONUS, reason: 'signup', createdAt: now })
-      .run();
+  await db.transaction(async (tx) => {
+    await tx.insert(users).values({ id, handle: name, points: SIGNUP_BONUS, createdAt: now });
+    await tx
+      .insert(pointsLedger)
+      .values({ id: randomUUID(), userId: id, delta: SIGNUP_BONUS, reason: 'signup', createdAt: now });
   });
-  return { account: { id, handle: name, points: SIGNUP_BONUS }, token: issueSession(id) };
+  return { account: { id, handle: name, points: SIGNUP_BONUS }, token: await issueSession(id) };
 }
 
-export function issueSession(userId: string): string {
+export async function issueSession(userId: string): Promise<string> {
   const token = randomUUID().replace(/-/g, '') + randomUUID().replace(/-/g, '');
   const now = new Date();
-  db.insert(sessions)
-    .values({ token, userId, createdAt: now, expiresAt: new Date(now.getTime() + SESSION_TTL_MS) })
-    .run();
+  await db
+    .insert(sessions)
+    .values({ token, userId, createdAt: now, expiresAt: new Date(now.getTime() + SESSION_TTL_MS) });
   return token;
 }
 
-export function accountFromToken(token?: string | null): Account | null {
+export async function accountFromToken(token?: string | null): Promise<Account | null> {
   if (!token) return null;
-  const s = db.select().from(sessions).where(eq(sessions.token, token)).get();
+  const s = (await db.select().from(sessions).where(eq(sessions.token, token)).limit(1))[0];
   if (!s || s.expiresAt.getTime() < Date.now()) return null;
   return getAccount(s.userId);
 }
 
-export function getAccount(userId: string): Account | null {
-  const u = db.select().from(users).where(eq(users.id, userId)).get();
+export async function getAccount(userId: string): Promise<Account | null> {
+  const u = (await db.select().from(users).where(eq(users.id, userId)).limit(1))[0];
   return u ? { id: u.id, handle: u.handle, points: u.points } : null;
 }
 
 /**
  * Adjust a user's points atomically with a ledger entry. Pass the transaction
- * handle from a `db.transaction(tx => …)` so the debit/credit and its side
+ * handle from a `db.transaction(async tx => …)` so the debit/credit and its side
  * effects (member insert, settlement) commit together. Throws if it would go
  * negative. Returns the new balance.
  */
-export function adjustPoints(
+export async function adjustPoints(
   tx: Tx,
   userId: string,
   delta: number,
   reason: 'signup' | 'stake' | 'payout' | 'refund' | 'bonus',
   poolId?: string,
-): number {
-  const u = tx.select().from(users).where(eq(users.id, userId)).get();
+): Promise<number> {
+  const u = (await tx.select().from(users).where(eq(users.id, userId)).limit(1))[0];
   if (!u) throw new Error('unknown user');
   const next = u.points + delta;
   if (next < 0) throw new Error('insufficient points');
-  tx.update(users).set({ points: next }).where(eq(users.id, userId)).run();
-  tx.insert(pointsLedger)
-    .values({ id: randomUUID(), userId, delta, reason, poolId, createdAt: new Date() })
-    .run();
+  await tx.update(users).set({ points: next }).where(eq(users.id, userId));
+  await tx
+    .insert(pointsLedger)
+    .values({ id: randomUUID(), userId, delta, reason, poolId, createdAt: new Date() });
   return next;
 }
 
 /** Global points leaderboard (top players by balance). */
-export function leaderboard(limit = 20): Array<{ id: string; handle: string; points: number }> {
+export async function leaderboard(limit = 20): Promise<Array<{ id: string; handle: string; points: number }>> {
   return db
     .select({ id: users.id, handle: users.handle, points: users.points })
     .from(users)
     .orderBy(desc(users.points))
-    .limit(limit)
-    .all();
+    .limit(limit);
 }

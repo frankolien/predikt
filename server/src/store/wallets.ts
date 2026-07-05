@@ -22,8 +22,9 @@ export interface LinkedWallet {
   mnemonic?: string; // returned once, on first creation
 }
 
-export function walletAddressOf(userId: string): string | null {
-  return db.select({ a: users.walletAddress }).from(users).where(eq(users.id, userId)).get()?.a ?? null;
+export async function walletAddressOf(userId: string): Promise<string | null> {
+  const row = (await db.select({ a: users.walletAddress }).from(users).where(eq(users.id, userId)).limit(1))[0];
+  return row?.a ?? null;
 }
 
 export async function balanceOf(address: string): Promise<number> {
@@ -36,18 +37,18 @@ export async function balanceOf(address: string): Promise<number> {
 
 /** Create + link a wallet (idempotent — returns the existing one if already linked). */
 export async function linkWallet(userId: string): Promise<LinkedWallet> {
-  const u = db.select().from(users).where(eq(users.id, userId)).get();
+  const u = (await db.select().from(users).where(eq(users.id, userId)).limit(1))[0];
   if (!u) throw new Error('unknown user');
   if (u.walletAddress) {
     return { address: u.walletAddress, usdtHuman: await balanceOf(u.walletAddress), backend: manager.walletBackend() };
   }
   const w = await manager.createWallet(u.handle);
-  db.update(users).set({ walletAddress: w.address }).where(eq(users.id, userId)).run();
+  await db.update(users).set({ walletAddress: w.address }).where(eq(users.id, userId));
   return { address: w.address, usdtHuman: w.usdtHuman, backend: w.backend, mnemonic: w.mnemonic };
 }
 
 export async function getWallet(userId: string): Promise<LinkedWallet | null> {
-  const addr = walletAddressOf(userId);
+  const addr = await walletAddressOf(userId);
   if (!addr) return null;
   return { address: addr, usdtHuman: await balanceOf(addr), backend: manager.walletBackend() };
 }

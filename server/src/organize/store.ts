@@ -51,7 +51,7 @@ function parseSplit(raw: string): number[] {
 
 // ---- create / join / entrants ----
 
-export function createTournament(opts: {
+export async function createTournament(opts: {
   organizerId: string;
   name?: string;
   maxPlayers?: number;
@@ -75,104 +75,99 @@ export function createTournament(opts: {
   const now = new Date();
   let code = inviteCode();
   for (let i = 0; i < 4; i++) {
-    if (!db.select({ id: tournaments.id }).from(tournaments).where(eq(tournaments.code, code)).get()) break;
+    const clash = (await db.select({ id: tournaments.id }).from(tournaments).where(eq(tournaments.code, code)).limit(1))[0];
+    if (!clash) break;
     code = inviteCode();
   }
 
-  db.insert(tournaments)
-    .values({
-      id,
-      code,
-      name,
-      format: 'knockout',
-      status: 'open',
-      organizerId: opts.organizerId,
-      entryFee,
-      currency,
-      maxPlayers: cap,
-      splitBps: JSON.stringify(split),
-      createdAt: now,
-    })
-    .run();
-  return getTournament(id)!;
+  await db.insert(tournaments).values({
+    id,
+    code,
+    name,
+    format: 'knockout',
+    status: 'open',
+    organizerId: opts.organizerId,
+    entryFee,
+    currency,
+    maxPlayers: cap,
+    splitBps: JSON.stringify(split),
+    createdAt: now,
+  });
+  return (await getTournament(id))!;
 }
 
 /** Organizer adds an offline/named entrant. Only for FREE cups (nobody pays). */
-export function addEntrant(opts: { tournamentId: string; organizerId: string; name: string }) {
-  const t = row(opts.tournamentId);
+export async function addEntrant(opts: { tournamentId: string; organizerId: string; name: string }) {
+  const t = await row(opts.tournamentId);
   if (!t) throw new Error('tournament not found');
   if (t.organizerId !== opts.organizerId) throw new Error('only the organizer can add entrants');
   if (t.status !== 'open') throw new Error('entries are closed');
   if (t.entryFee > 0) throw new Error('paid cups fill by invite code — share it so players can pay in');
-  if (countParticipants(t.id) >= t.maxPlayers) throw new Error('the bracket is full');
+  if ((await countParticipants(t.id)) >= t.maxPlayers) throw new Error('the bracket is full');
   const name = (opts.name || 'Entrant').toString().trim().slice(0, 40) || 'Entrant';
-  db.insert(tournamentParticipants)
-    .values({ id: randomUUID(), tournamentId: t.id, name, staked: 0, joinedAt: new Date() })
-    .run();
-  return getTournament(t.id)!;
+  await db.insert(tournamentParticipants).values({ id: randomUUID(), tournamentId: t.id, name, staked: 0, joinedAt: new Date() });
+  return (await getTournament(t.id))!;
 }
 
 /** A user joins by code (or id) and pays the entry — points debit or real USD₮. */
 export async function joinTournament(opts: { code?: string; tournamentId?: string; userId: string }) {
-  const t = opts.tournamentId ? row(opts.tournamentId) : opts.code ? rowByCode(opts.code) : null;
+  const t = opts.tournamentId ? await row(opts.tournamentId) : opts.code ? await rowByCode(opts.code) : null;
   if (!t) throw new Error('tournament not found');
   if (t.status !== 'open') throw new Error('entries are closed');
-  if (countParticipants(t.id) >= t.maxPlayers) throw new Error('the bracket is full');
-  const dup = db
-    .select({ id: tournamentParticipants.id })
-    .from(tournamentParticipants)
-    .where(and(eq(tournamentParticipants.tournamentId, t.id), eq(tournamentParticipants.userId, opts.userId)))
-    .get();
+  if ((await countParticipants(t.id)) >= t.maxPlayers) throw new Error('the bracket is full');
+  const dup = (
+    await db
+      .select({ id: tournamentParticipants.id })
+      .from(tournamentParticipants)
+      .where(and(eq(tournamentParticipants.tournamentId, t.id), eq(tournamentParticipants.userId, opts.userId)))
+      .limit(1)
+  )[0];
   if (dup) throw new Error('you have already joined this cup');
 
-  const user = db.select({ handle: users.handle }).from(users).where(eq(users.id, opts.userId)).get();
+  const user = (await db.select({ handle: users.handle }).from(users).where(eq(users.id, opts.userId)).limit(1))[0];
   if (!user) throw new Error('unknown user');
 
-  const insert = (depositTx?: string) =>
-    db
-      .insert(tournamentParticipants)
-      .values({
-        id: randomUUID(),
-        tournamentId: t.id,
-        userId: opts.userId,
-        name: user.handle,
-        staked: t.entryFee,
-        depositTx,
-        joinedAt: new Date(),
-      })
-      .run();
+  const entry = {
+    id: randomUUID(),
+    tournamentId: t.id,
+    userId: opts.userId,
+    name: user.handle,
+    staked: t.entryFee,
+    joinedAt: new Date(),
+  };
 
   if (t.currency === 'usdt') {
     let depositTx: string | undefined;
     if (t.entryFee > 0) {
-      const addr = walletAddressOf(opts.userId);
+      const addr = await walletAddressOf(opts.userId);
       if (!addr) throw new Error('connect a USD₮ wallet first');
-      depositTx = await escrow.collect(addr, BigInt(t.entryFee)); // real USD₮ → treasury
+      depositTx = await escrow.collect(addr, BigInt(t.entryFee)); // real USD₮ → treasury (before we open a txn)
     }
-    insert(depositTx);
+    await db.transaction(async (tx) => {
+      await tx.insert(tournamentParticipants).values({ ...entry, depositTx });
+    });
   } else {
-    db.transaction((tx) => {
-      if (t.entryFee > 0) adjustPoints(tx, opts.userId, -t.entryFee, 'stake', t.id); // throws if short
-      insert();
+    await db.transaction(async (tx) => {
+      if (t.entryFee > 0) await adjustPoints(tx, opts.userId, -t.entryFee, 'stake', t.id); // throws if short
+      await tx.insert(tournamentParticipants).values(entry);
     });
   }
-  return getTournament(t.id)!;
+  return (await getTournament(t.id))!;
 }
 
 // ---- start (seed + generate bracket) ----
 
-export function startTournament(opts: { tournamentId: string; organizerId: string; seeding?: 'random' | 'join' }) {
-  const t = row(opts.tournamentId);
+export async function startTournament(opts: { tournamentId: string; organizerId: string; seeding?: 'random' | 'join' }) {
+  const t = await row(opts.tournamentId);
   if (!t) throw new Error('tournament not found');
   if (t.organizerId !== opts.organizerId) throw new Error('only the organizer can start the cup');
   if (t.status !== 'open') throw new Error('cup already started');
 
-  const parts = db
+  const parts = await db
     .select()
     .from(tournamentParticipants)
     .where(eq(tournamentParticipants.tournamentId, t.id))
-    .orderBy(asc(tournamentParticipants.joinedAt))
-    .all();
+    .orderBy(asc(tournamentParticipants.joinedAt));
   if (parts.length < 2) throw new Error('need at least 2 entrants to kick off');
 
   // Seed the field: random draw by default, or by join order.
@@ -227,31 +222,29 @@ export function startTournament(opts: { tournamentId: string; organizerId: strin
   for (const r of rows) if (r.status !== 'confirmed' && r.home && r.away) r.status = 'ready';
 
   const now = new Date();
-  db.transaction((tx) => {
-    seeded.forEach((p, i) => {
-      tx.update(tournamentParticipants).set({ seed: i + 1 }).where(eq(tournamentParticipants.id, p.id)).run();
-    });
-    for (const r of rows) {
-      tx.insert(tournamentMatches)
-        .values({
-          id: r.id,
-          tournamentId: t.id,
-          round: r.round,
-          slot: r.slot,
-          homeParticipantId: r.home,
-          awayParticipantId: r.away,
-          winnerParticipantId: r.winner,
-          decidedBy: r.winner ? 'normal' : null, // byes settle "normally"
-          status: r.status,
-          nextMatchId: r.nextMatchId,
-          nextSlot: r.nextSide,
-          createdAt: now,
-        })
-        .run();
+  await db.transaction(async (tx) => {
+    for (const [i, p] of seeded.entries()) {
+      await tx.update(tournamentParticipants).set({ seed: i + 1 }).where(eq(tournamentParticipants.id, p.id));
     }
-    tx.update(tournaments).set({ status: 'live', startedAt: now }).where(eq(tournaments.id, t.id)).run();
+    for (const r of rows) {
+      await tx.insert(tournamentMatches).values({
+        id: r.id,
+        tournamentId: t.id,
+        round: r.round,
+        slot: r.slot,
+        homeParticipantId: r.home,
+        awayParticipantId: r.away,
+        winnerParticipantId: r.winner,
+        decidedBy: r.winner ? 'normal' : null, // byes settle "normally"
+        status: r.status,
+        nextMatchId: r.nextMatchId,
+        nextSlot: r.nextSide,
+        createdAt: now,
+      });
+    }
+    await tx.update(tournaments).set({ status: 'live', startedAt: now }).where(eq(tournaments.id, t.id));
   });
-  return getTournament(t.id)!;
+  return (await getTournament(t.id))!;
 }
 
 // ---- report a result (advances the bracket, settles on the final) ----
@@ -264,12 +257,12 @@ export async function reportMatch(opts: {
   awayScore: number;
   penaltyWinner?: 'home' | 'away';
 }) {
-  const t = row(opts.tournamentId);
+  const t = await row(opts.tournamentId);
   if (!t) throw new Error('tournament not found');
   if (t.organizerId !== opts.organizerId) throw new Error('only the organizer can enter scores');
   if (t.status !== 'live') throw new Error('cup is not in play');
 
-  const m = db.select().from(tournamentMatches).where(eq(tournamentMatches.id, opts.matchId)).get();
+  const m = (await db.select().from(tournamentMatches).where(eq(tournamentMatches.id, opts.matchId)).limit(1))[0];
   if (!m || m.tournamentId !== t.id) throw new Error('match not found');
   if (m.status === 'confirmed') throw new Error('that tie is already decided');
   if (!m.homeParticipantId || !m.awayParticipantId) throw new Error('both sides must be set first');
@@ -289,42 +282,42 @@ export async function reportMatch(opts: {
   const loser = winner === m.homeParticipantId ? m.awayParticipantId : m.homeParticipantId;
   const isFinal = !m.nextMatchId;
 
-  db.transaction((tx) => {
-    tx.update(tournamentMatches)
+  await db.transaction(async (tx) => {
+    await tx
+      .update(tournamentMatches)
       .set({ homeScore: hs, awayScore: as, winnerParticipantId: winner, decidedBy, status: 'confirmed' })
-      .where(eq(tournamentMatches.id, m.id))
-      .run();
-    tx.update(tournamentParticipants).set({ status: 'eliminated' }).where(eq(tournamentParticipants.id, loser)).run();
+      .where(eq(tournamentMatches.id, m.id));
+    await tx.update(tournamentParticipants).set({ status: 'eliminated' }).where(eq(tournamentParticipants.id, loser));
 
     if (!isFinal && m.nextMatchId) {
-      const nx = db.select().from(tournamentMatches).where(eq(tournamentMatches.id, m.nextMatchId)).get();
+      const nx = (await tx.select().from(tournamentMatches).where(eq(tournamentMatches.id, m.nextMatchId)).limit(1))[0];
       if (nx) {
         const patch = m.nextSlot === 'home' ? { homeParticipantId: winner } : { awayParticipantId: winner };
         const bothSet =
           (m.nextSlot === 'home' ? winner : nx.homeParticipantId) &&
           (m.nextSlot === 'away' ? winner : nx.awayParticipantId);
-        tx.update(tournamentMatches)
+        await tx
+          .update(tournamentMatches)
           .set({ ...patch, status: bothSet ? 'ready' : nx.status })
-          .where(eq(tournamentMatches.id, nx.id))
-          .run();
+          .where(eq(tournamentMatches.id, nx.id));
       }
     }
   });
 
-  // Final decided → crown + pay out. Points settle synchronously; USD₮ pays out
-  // over real on-chain transfers (async), so it runs outside the DB transaction.
+  // Final decided → crown + pay out. Points settle in one transaction; USD₮ pays
+  // out over real on-chain transfers (async), so it runs outside a DB transaction.
   if (isFinal) {
     if (t.currency === 'usdt') await settleUsdt(t.id, winner, loser);
-    else settlePoints(t.id, winner, loser);
+    else await settlePoints(t.id, winner, loser);
   }
-  return getTournament(t.id)!;
+  return (await getTournament(t.id))!;
 }
 
 /** Placement groups + conserved integer split. Pure read of current state. */
-function computeDistribution(tournamentId: string, championId: string, runnerUpId: string) {
-  const t = row(tournamentId)!;
-  const parts = db.select().from(tournamentParticipants).where(eq(tournamentParticipants.tournamentId, tournamentId)).all();
-  const matches = db.select().from(tournamentMatches).where(eq(tournamentMatches.tournamentId, tournamentId)).all();
+async function computeDistribution(tournamentId: string, championId: string, runnerUpId: string) {
+  const t = (await row(tournamentId))!;
+  const parts = await db.select().from(tournamentParticipants).where(eq(tournamentParticipants.tournamentId, tournamentId));
+  const matches = await db.select().from(tournamentMatches).where(eq(tournamentMatches.tournamentId, tournamentId));
   const totalRounds = Math.max(...matches.map((mm) => mm.round));
 
   const groups: string[][] = [[championId], [runnerUpId]];
@@ -363,63 +356,69 @@ function computeDistribution(tournamentId: string, championId: string, runnerUpI
 }
 
 /** Points settlement — atomic ledger credits inside one transaction. */
-function settlePoints(tournamentId: string, championId: string, runnerUpId: string) {
-  const { parts, payout, placementOf } = computeDistribution(tournamentId, championId, runnerUpId);
-  db.transaction((tx) => {
+async function settlePoints(tournamentId: string, championId: string, runnerUpId: string) {
+  const { parts, payout, placementOf } = await computeDistribution(tournamentId, championId, runnerUpId);
+  await db.transaction(async (tx) => {
     for (const p of parts) {
       const won = payout.get(p.id) ?? 0;
-      if (won > 0 && p.userId) adjustPoints(tx, p.userId, won, 'payout', tournamentId);
-      tx.update(tournamentParticipants)
+      if (won > 0 && p.userId) await adjustPoints(tx, p.userId, won, 'payout', tournamentId);
+      await tx
+        .update(tournamentParticipants)
         .set({ placement: placementOf(p.id), payout: won > 0 ? won : null, status: p.id === championId ? 'champion' : p.status })
-        .where(eq(tournamentParticipants.id, p.id))
-        .run();
+        .where(eq(tournamentParticipants.id, p.id));
     }
-    tx.update(tournaments).set({ status: 'completed', completedAt: new Date(), winnerId: championId }).where(eq(tournaments.id, tournamentId)).run();
+    await tx
+      .update(tournaments)
+      .set({ status: 'completed', completedAt: new Date(), winnerId: championId })
+      .where(eq(tournaments.id, tournamentId));
   });
 }
 
 /** USD₮ settlement — real on-chain payouts from the treasury to each winner. */
 async function settleUsdt(tournamentId: string, championId: string, runnerUpId: string) {
-  const { parts, payout, placementOf } = computeDistribution(tournamentId, championId, runnerUpId);
+  const { parts, payout, placementOf } = await computeDistribution(tournamentId, championId, runnerUpId);
   for (const p of parts) {
     const won = payout.get(p.id) ?? 0;
     let payoutTx: string | undefined;
     if (won > 0 && p.userId) {
-      const addr = walletAddressOf(p.userId);
+      const addr = await walletAddressOf(p.userId);
       if (addr) payoutTx = await escrow.pay(addr, BigInt(won)); // real USD₮ → winner
     }
-    db.update(tournamentParticipants)
+    await db
+      .update(tournamentParticipants)
       .set({ placement: placementOf(p.id), payout: won > 0 ? won : null, payoutTx, status: p.id === championId ? 'champion' : p.status })
-      .where(eq(tournamentParticipants.id, p.id))
-      .run();
+      .where(eq(tournamentParticipants.id, p.id));
   }
-  db.update(tournaments).set({ status: 'completed', completedAt: new Date(), winnerId: championId }).where(eq(tournaments.id, tournamentId)).run();
+  await db
+    .update(tournaments)
+    .set({ status: 'completed', completedAt: new Date(), winnerId: championId })
+    .where(eq(tournaments.id, tournamentId));
 }
 
 /** Cancel an un-started cup and refund every paid entrant. */
 export async function cancelTournament(opts: { tournamentId: string; organizerId: string }) {
-  const t = row(opts.tournamentId);
+  const t = await row(opts.tournamentId);
   if (!t) throw new Error('tournament not found');
   if (t.organizerId !== opts.organizerId) throw new Error('only the organizer can cancel');
   if (t.status !== 'open') throw new Error('a cup in play cannot be cancelled');
-  const parts = db.select().from(tournamentParticipants).where(eq(tournamentParticipants.tournamentId, t.id)).all();
+  const parts = await db.select().from(tournamentParticipants).where(eq(tournamentParticipants.tournamentId, t.id));
   if (t.currency === 'usdt') {
     for (const p of parts) {
       if (p.staked > 0 && p.userId) {
-        const addr = walletAddressOf(p.userId);
+        const addr = await walletAddressOf(p.userId);
         if (addr) await escrow.pay(addr, BigInt(p.staked)); // refund USD₮
       }
     }
-    db.update(tournaments).set({ status: 'cancelled', completedAt: new Date() }).where(eq(tournaments.id, t.id)).run();
+    await db.update(tournaments).set({ status: 'cancelled', completedAt: new Date() }).where(eq(tournaments.id, t.id));
   } else {
-    db.transaction((tx) => {
+    await db.transaction(async (tx) => {
       for (const p of parts) {
-        if (p.staked > 0 && p.userId) adjustPoints(tx, p.userId, p.staked, 'refund', t.id);
+        if (p.staked > 0 && p.userId) await adjustPoints(tx, p.userId, p.staked, 'refund', t.id);
       }
-      tx.update(tournaments).set({ status: 'cancelled', completedAt: new Date() }).where(eq(tournaments.id, t.id)).run();
+      await tx.update(tournaments).set({ status: 'cancelled', completedAt: new Date() }).where(eq(tournaments.id, t.id));
     });
   }
-  return getTournament(t.id)!;
+  return (await getTournament(t.id))!;
 }
 
 // ---- views ----
@@ -471,21 +470,19 @@ export interface TournamentView {
   }>;
 }
 
-export function getTournament(id: string): TournamentView | null {
-  const t = row(id);
+export async function getTournament(id: string): Promise<TournamentView | null> {
+  const t = await row(id);
   if (!t) return null;
-  const parts = db
+  const parts = await db
     .select()
     .from(tournamentParticipants)
     .where(eq(tournamentParticipants.tournamentId, id))
-    .orderBy(asc(tournamentParticipants.seed), asc(tournamentParticipants.joinedAt))
-    .all();
-  const matches = db
+    .orderBy(asc(tournamentParticipants.seed), asc(tournamentParticipants.joinedAt));
+  const matches = await db
     .select()
     .from(tournamentMatches)
     .where(eq(tournamentMatches.tournamentId, id))
-    .orderBy(asc(tournamentMatches.round), asc(tournamentMatches.slot))
-    .all();
+    .orderBy(asc(tournamentMatches.round), asc(tournamentMatches.slot));
 
   const nameOf = new Map(parts.map((p) => [p.id, p.name]));
   const totalRounds = matches.length ? Math.max(...matches.map((m) => m.round)) : Math.log2(bracketSize(parts.length));
@@ -545,30 +542,28 @@ export function getTournament(id: string): TournamentView | null {
   };
 }
 
-export function getTournamentByCode(code: string): TournamentView | null {
-  const t = rowByCode(code);
+export async function getTournamentByCode(code: string): Promise<TournamentView | null> {
+  const t = await rowByCode(code);
   return t ? getTournament(t.id) : null;
 }
 
 /** Cups a user organizes or plays in (most recent first). */
-export function tournamentsForUser(userId: string): TournamentView[] {
-  const asPlayer = db
+export async function tournamentsForUser(userId: string): Promise<TournamentView[]> {
+  const playerRows = await db
     .select({ id: tournamentParticipants.tournamentId })
     .from(tournamentParticipants)
-    .where(eq(tournamentParticipants.userId, userId))
-    .all()
-    .map((r) => r.id);
-  const rows = db
+    .where(eq(tournamentParticipants.userId, userId));
+  const asPlayer = playerRows.map((r) => r.id);
+  const rows = await db
     .select()
     .from(tournaments)
-    .where(or(eq(tournaments.organizerId, userId), asPlayer.length ? inArrayIds(asPlayer) : eq(tournaments.id, '')))
-    .all();
+    .where(or(eq(tournaments.organizerId, userId), asPlayer.length ? inArrayIds(asPlayer) : eq(tournaments.id, '')));
   const seen = new Set<string>();
-  return rows
+  const unique = rows
     .filter((r) => (seen.has(r.id) ? false : (seen.add(r.id), true)))
-    .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
-    .map((r) => getTournament(r.id)!)
-    .filter(Boolean);
+    .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+  const views = await Promise.all(unique.map((r) => getTournament(r.id)));
+  return views.filter((v): v is TournamentView => !!v);
 }
 
 // ---- internals ----
@@ -582,14 +577,15 @@ function side(
   return { participantId: pid, name, code: name ? deriveCode(name) : null, score };
 }
 
-function row(id: string) {
-  return db.select().from(tournaments).where(eq(tournaments.id, id)).get() ?? null;
+async function row(id: string) {
+  return (await db.select().from(tournaments).where(eq(tournaments.id, id)).limit(1))[0] ?? null;
 }
-function rowByCode(code: string) {
-  return db.select().from(tournaments).where(eq(tournaments.code, code.trim().toUpperCase())).get() ?? null;
+async function rowByCode(code: string) {
+  return (await db.select().from(tournaments).where(eq(tournaments.code, code.trim().toUpperCase())).limit(1))[0] ?? null;
 }
-function countParticipants(tournamentId: string): number {
-  return db.select({ id: tournamentParticipants.id }).from(tournamentParticipants).where(eq(tournamentParticipants.tournamentId, tournamentId)).all().length;
+async function countParticipants(tournamentId: string): Promise<number> {
+  const rows = await db.select({ id: tournamentParticipants.id }).from(tournamentParticipants).where(eq(tournamentParticipants.tournamentId, tournamentId));
+  return rows.length;
 }
 function inArrayIds(ids: string[]) {
   // Small OR chain (fields are few); avoids importing inArray for a tiny set.
