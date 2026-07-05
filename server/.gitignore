@@ -1,0 +1,13 @@
+# build output
+dist/
+
+# local SQLite database — disposable; schema lives in drizzle/
+*.db
+*.db-shm
+*.db-wal
+
+# deps
+node_modules/
+
+# logs
+*.log
