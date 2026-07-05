@@ -99,7 +99,9 @@ export function PoolStandings({
 
       <div className="flex items-center justify-between border-t border-edge px-4 py-2.5">
         <Eyebrow>pot</Eyebrow>
-        <span className="font-mono text-[13px] text-chalk">{usdt(pool.potPoints, 0)} pts</span>
+        <span className="font-mono text-[13px] text-chalk">
+          {usdt(pool.potPoints, pool.currency === "usdt" ? 2 : 0)} {pool.currency === "usdt" ? "USD₮" : "pts"}
+        </span>
       </div>
     </Card>
   );

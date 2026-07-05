@@ -161,10 +161,12 @@ function LeagueActions({
 }) {
   const [name, setName] = useState("");
   const [buyIn, setBuyIn] = useState(50);
+  const [currency, setCurrency] = useState<"points" | "usdt">("points");
   const [split, setSplit] = useState(SPLITS[0]);
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const unit = currency === "usdt" ? "USD₮" : "pts";
 
   const guard = () => {
     if (!squad.valid) {
@@ -186,7 +188,7 @@ function LeagueActions({
     if (!guard()) return;
     setBusy("create");
     try {
-      const lg = await api.fantasy.createLeague({ name: name.trim() || "Fantasy League", buyIn, splitBps: split.bps });
+      const lg = await api.fantasy.createLeague({ name: name.trim() || "Fantasy League", buyIn, splitBps: split.bps, currency });
       const full = await api.fantasy.join({ leagueId: lg.id, ...entry() });
       refreshAccount();
       onOpen(full);
@@ -225,12 +227,31 @@ function LeagueActions({
           placeholder="League name (e.g. The Sunday Boys)"
           className="rounded-default border border-edge-2 bg-panel-2 px-3 py-2.5 text-[14px] text-chalk placeholder:text-faint focus:border-edge-3 focus:outline-none"
         />
+        <div className="flex gap-1.5">
+          <button
+            onClick={() => { setCurrency("points"); setBuyIn(50); }}
+            className={`rounded-default border px-2.5 py-1.5 font-mono text-[10px] transition-colors ${
+              currency === "points" ? "border-edge-3 bg-white/[0.04] text-chalk" : "border-edge-2 text-steel hover:border-edge-3"
+            }`}
+          >
+            Free · points
+          </button>
+          <button
+            onClick={() => { setCurrency("usdt"); setBuyIn(5); }}
+            className={`rounded-default border px-2.5 py-1.5 font-mono text-[10px] transition-colors ${
+              currency === "usdt" ? "border-edge-3 bg-white/[0.04] text-chalk" : "border-edge-2 text-steel hover:border-edge-3"
+            }`}
+          >
+            Real · USD₮
+          </button>
+        </div>
         <div className="flex flex-wrap items-center gap-2">
           <label className="flex items-center gap-2">
-            <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-faint">buy-in</span>
+            <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-faint">buy-in · {unit}</span>
             <input
               type="number"
               min={0}
+              step={currency === "usdt" ? 0.5 : 1}
               value={buyIn}
               onChange={(e) => setBuyIn(Number(e.target.value))}
               className="w-20 rounded-default border border-edge-2 bg-panel-2 px-2.5 py-2 font-mono text-[13px] text-chalk focus:border-edge-3 focus:outline-none"
@@ -377,7 +398,7 @@ function LeagueDetail({
       {/* your XI — the pitch, live scores, and where the points go */}
       {me && (
         <Reveal className="mt-6">
-          <YourXI me={me} live={lg.status === "live"} money={money} />
+          <YourXI me={me} live={lg.status === "live"} money={money} currency={lg.currency} />
         </Reveal>
       )}
 
@@ -427,7 +448,7 @@ function toPitch(players: FantasyStanding["players"]) {
 const short = (name?: string) => (name ? name.split(/\s+/).slice(-1)[0] : "—");
 
 /* Your squad on the pitch + bench + a plain-language legend so "points" never collides. */
-function YourXI({ me, live, money }: { me: FantasyStanding; live: boolean; money: (n: number) => string }) {
+function YourXI({ me, live, money, currency }: { me: FantasyStanding; live: boolean; money: (n: number) => string; currency: "points" | "usdt" }) {
   const armband = me.players.find((p) => p.id === (me.captainedId ?? me.captainId));
   const viceTookOver = me.captainedId != null && me.captainedId !== me.captainId;
   const capMult = me.chip === "tc" ? "×3" : "×2";
@@ -482,8 +503,8 @@ function YourXI({ me, live, money }: { me: FantasyStanding; live: boolean; money
               captain blanks, the <span className="text-chalk">vice</span> takes the armband.
             </li>
             <li>
-              <span className="text-chalk">Buy-in &amp; pot</span> are play-points — you staked {money(me.staked)} into the
-              pot. Whoever's on top when the league settles takes it home.
+              <span className="text-chalk">Buy-in &amp; pot</span> are {currency === "usdt" ? "real USD₮, paid on-chain from your wallet" : "play-points"} — you
+              staked {money(me.staked)} {currency === "usdt" ? "USD₮" : "pts"} into the pot. Whoever's on top when the league settles takes it home.
             </li>
           </ul>
         </div>

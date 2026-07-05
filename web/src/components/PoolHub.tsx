@@ -6,6 +6,7 @@ import { impliedReturn, oddsLabel, outcomeText, usdt } from "../lib/format";
 import { cn } from "../lib/cn";
 
 const BUYINS = [25, 50, 100, 250];
+const USDT_BUYINS = [1, 5, 10, 25];
 
 function friendly(msg: string): string {
   const m = (msg || "").toLowerCase();
@@ -65,9 +66,11 @@ export function PoolHub({
   const [publicPools, setPublicPools] = useState<PointsPool[]>([]);
   const [name, setName] = useState("");
   const [buyIn, setBuyIn] = useState(50);
+  const [currency, setCurrency] = useState<"points" | "usdt">("points");
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const unit = currency === "usdt" ? "USD₮" : "pts";
 
   useEffect(() => {
     api.pools.forFixture(fixture.id).then((r) => setPublicPools(r.pools)).catch(() => {});
@@ -88,7 +91,7 @@ export function PoolHub({
   };
   const createAndJoin = () =>
     wrap(async () => {
-      const pool = await api.pools.create(fixture.id, { name: name.trim() || undefined, buyIn, isPublic: true });
+      const pool = await api.pools.create(fixture.id, { name: name.trim() || undefined, buyIn, isPublic: true, currency });
       return (await api.pools.join({ poolId: pool.id, prediction })).pool;
     });
   const joinByCode = () => wrap(async () => (await api.pools.join({ code: code.trim(), prediction })).pool);
@@ -123,7 +126,7 @@ export function PoolHub({
                 <span className="min-w-0">
                   <span className="block truncate text-[13.5px] font-medium text-chalk">{p.name}</span>
                   <span className="label-mono !text-[9px]">
-                    <Users size={9} className="inline" /> {p.memberCount} in · {usdt(p.potPoints, 0)} pts pot · {p.buyIn} buy-in
+                    <Users size={9} className="inline" /> {p.memberCount} in · {usdt(p.potPoints, 0)} {p.currency === "usdt" ? "USD₮" : "pts"} pot · {p.buyIn} buy-in
                   </span>
                 </span>
                 <span className="ml-2 shrink-0 text-right">
@@ -147,8 +150,22 @@ export function PoolHub({
           className="mb-2 w-full rounded-default border border-edge-2 bg-panel-2 px-3 py-2 text-[13.5px] text-chalk placeholder:text-faint focus:border-edge-3 focus:outline-none"
         />
         <div className="mb-2 flex items-center gap-1.5">
-          <span className="label-mono mr-1">buy-in</span>
-          {BUYINS.map((b) => (
+          <button
+            onClick={() => { setCurrency("points"); setBuyIn(50); }}
+            className={cn("rounded-default border px-2.5 py-1 font-mono text-[10px]", currency === "points" ? "border-edge-3 bg-white/[0.04] text-chalk" : "border-edge-2 text-steel hover:border-edge-3")}
+          >
+            Free · points
+          </button>
+          <button
+            onClick={() => { setCurrency("usdt"); setBuyIn(5); }}
+            className={cn("rounded-default border px-2.5 py-1 font-mono text-[10px]", currency === "usdt" ? "border-edge-3 bg-white/[0.04] text-chalk" : "border-edge-2 text-steel hover:border-edge-3")}
+          >
+            Real · USD₮
+          </button>
+        </div>
+        <div className="mb-2 flex items-center gap-1.5">
+          <span className="label-mono mr-1">buy-in · {unit}</span>
+          {(currency === "usdt" ? USDT_BUYINS : BUYINS).map((b) => (
             <button
               key={b}
               onClick={() => setBuyIn(b)}

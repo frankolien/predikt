@@ -29,9 +29,9 @@ console.log(`signup bonus → Alice=${alice.points} Bob=${bob.points} Cara=${car
 const pool = createPool({ creatorId: alice.id, fixtureId, name: 'Mates league', buyIn: 100, isPublic: true });
 console.log(`\npool ${pool.code} "${pool.name}" · buy-in ${pool.buyIn} pts`);
 
-joinPool({ poolId: pool.id, userId: alice.id, predHome: 2, predAway: 1 }); // home win
-joinPool({ code: pool.code, userId: bob.id, predHome: 0, predAway: 0 }); // draw
-joinPool({ code: pool.code, userId: cara.id, predHome: 1, predAway: 3 }); // away win
+await joinPool({ poolId: pool.id, userId: alice.id, predHome: 2, predAway: 1 }); // home win
+await joinPool({ code: pool.code, userId: bob.id, predHome: 0, predAway: 0 }); // draw
+await joinPool({ code: pool.code, userId: cara.id, predHome: 1, predAway: 3 }); // away win
 
 let view = getPool(pool.id)!;
 console.log(`pot ${view.potPoints} pts · ${view.memberCount} in`);
@@ -39,7 +39,7 @@ for (const m of view.members) console.log(`  ${m.handle.padEnd(6)} ${m.predictio
 console.log(`balances after join → Alice=${bal(alice.id)} Bob=${bal(bob.id)} Cara=${bal(cara.id)}`);
 
 // Settle on a home win (2-0) — only Alice called the home outcome.
-view = settlePool(pool.id, { homeGoals: 2, awayGoals: 0 });
+view = await settlePool(pool.id, { homeGoals: 2, awayGoals: 0 });
 console.log(`\nsettled ${view.result!.homeGoals}-${view.result!.awayGoals}`);
 for (const m of view.members) {
   console.log(`  ${m.handle.padEnd(6)} ${m.won ? `WON +${m.winnings}` : 'lost'}${m.exact ? ' (exact score!)' : ''}`);

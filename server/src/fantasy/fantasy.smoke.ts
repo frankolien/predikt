@@ -78,7 +78,7 @@ const creator = mgrs[0].account.id;
 let lg = fantasy.createLeague({ creatorId: creator, name: 'Smoke League', buyIn: 100, splitBps: [10000] });
 for (const m of mgrs) {
   const draft = autoDraft();
-  lg = fantasy.joinLeague({ leagueId: lg.id, userId: m.account.id, squadIds: draft.squadIds, starterIds: draft.starterIds, captainId: draft.captainId, viceId: draft.viceId });
+  lg = await fantasy.joinLeague({ leagueId: lg.id, userId: m.account.id, squadIds: draft.squadIds, starterIds: draft.starterIds, captainId: draft.captainId, viceId: draft.viceId });
 }
 check('3 managers joined', lg.memberCount === 3, lg.memberCount);
 check('pot = 300', lg.pot === 300, lg.pot);
@@ -88,7 +88,7 @@ const afterJoin = mgrs.reduce((a, m) => a + getAccount(m.account.id)!.points, 0)
 check('each debited 100 (sum = 2700)', afterJoin === 2700, afterJoin);
 
 lg = fantasy.startLeague({ leagueId: lg.id, creatorId: creator });
-lg = fantasy.settleLeague({ leagueId: lg.id, creatorId: creator });
+lg = await fantasy.settleLeague({ leagueId: lg.id, creatorId: creator });
 check('league settled', lg.status === 'settled', lg.status);
 const totalPoints = mgrs.reduce((a, m) => a + getAccount(m.account.id)!.points, 0);
 check('points conserved (3×1000 = 3000)', totalPoints === 3000, totalPoints);

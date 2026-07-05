@@ -36,7 +36,8 @@ export const pools = sqliteTable(
     creatorId: text('creator_id')
       .notNull()
       .references(() => users.id),
-    buyIn: integer('buy_in').notNull().default(50), // points to enter
+    buyIn: integer('buy_in').notNull().default(50), // points, or µUSD₮ when currency='usdt'
+    currency: text('currency', { enum: ['points', 'usdt'] }).notNull().default('points'),
     isPublic: integer('is_public', { mode: 'boolean' }).notNull().default(false),
     status: text('status', { enum: ['open', 'locked', 'settled'] })
       .notNull()
@@ -67,10 +68,12 @@ export const poolMembers = sqliteTable(
       .references(() => users.id),
     predHome: integer('pred_home').notNull(),
     predAway: integer('pred_away').notNull(),
-    staked: integer('staked').notNull(),
+    staked: integer('staked').notNull(), // points, or µUSD₮ when the pool is usdt
+    depositTx: text('deposit_tx'), // USD₮ buy-in tx hash
     // Filled at settlement:
     won: integer('won', { mode: 'boolean' }),
     winnings: integer('winnings'),
+    payoutTx: text('payout_tx'), // USD₮ payout tx hash
     exact: integer('exact', { mode: 'boolean' }),
     joinedAt: integer('joined_at', { mode: 'timestamp_ms' }).notNull(),
   },

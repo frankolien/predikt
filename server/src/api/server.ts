@@ -97,7 +97,7 @@ export function buildApp() {
   app.post('/api/pools', async (req, reply) => {
     const a = authed(req);
     if (!a) return reply.code(401).send({ error: 'sign in first' });
-    const b = (req.body ?? {}) as { fixtureId?: string; name?: string; buyIn?: number; isPublic?: boolean };
+    const b = (req.body ?? {}) as { fixtureId?: string; name?: string; buyIn?: number; isPublic?: boolean; currency?: 'points' | 'usdt' };
     if (!b.fixtureId) return reply.code(400).send({ error: 'fixtureId required' });
     try {
       return store.createPool({
@@ -106,6 +106,7 @@ export function buildApp() {
         name: b.name,
         buyIn: b.buyIn,
         isPublic: b.isPublic,
+        currency: b.currency,
       });
     } catch (err) {
       return reply.code(400).send({ error: (err as Error).message });
@@ -135,7 +136,7 @@ export function buildApp() {
       prediction?: { homeGoals?: number; awayGoals?: number };
     };
     try {
-      const pool = store.joinPool({
+      const pool = await store.joinPool({
         poolId: b.poolId,
         code: b.code,
         userId: a.id,
@@ -347,7 +348,7 @@ export function buildApp() {
       chip?: 'tc' | 'bb' | null;
     };
     try {
-      return fantasy.joinLeague({
+      return await fantasy.joinLeague({
         code: b.code,
         leagueId: b.leagueId,
         userId: a.id,
@@ -378,7 +379,7 @@ export function buildApp() {
     if (!a) return reply.code(401).send({ error: 'sign in first' });
     const { id } = req.params as { id: string };
     try {
-      return fantasy.settleLeague({ leagueId: id, creatorId: a.id });
+      return await fantasy.settleLeague({ leagueId: id, creatorId: a.id });
     } catch (err) {
       return reply.code(400).send({ error: (err as Error).message });
     }

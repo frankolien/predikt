@@ -106,6 +106,8 @@ export interface PoolMemberView {
   won: boolean | null;
   winnings: number | null;
   exact: boolean;
+  depositTx?: string | null; // USD₮ buy-in tx hash (usdt pools)
+  payoutTx?: string | null; // USD₮ payout tx hash (usdt pools)
 }
 
 export interface PointsPool {
@@ -114,6 +116,7 @@ export interface PointsPool {
   name: string;
   fixtureId: string;
   buyIn: number;
+  currency: "points" | "usdt";
   isPublic: boolean;
   status: "open" | "locked" | "settled";
   lockTime: string | null;
@@ -228,6 +231,8 @@ export interface FantasyStanding {
   placement: number | null;
   payout: number | null;
   staked: number;
+  depositTx?: string | null; // USD₮ buy-in tx hash (usdt leagues)
+  payoutTx?: string | null; // USD₮ payout tx hash (usdt leagues)
   players: FantasyStandingPlayer[];
 }
 
@@ -364,7 +369,7 @@ export const api = {
   },
   leaderboard: () => get<{ leaderboard: Account[] }>("/leaderboard"),
   pools: {
-    create: (fixtureId: string, opts?: { name?: string; buyIn?: number; isPublic?: boolean }) =>
+    create: (fixtureId: string, opts?: { name?: string; buyIn?: number; isPublic?: boolean; currency?: "points" | "usdt" }) =>
       post<PointsPool>("/pools", { fixtureId, ...opts }),
     get: (id: string) => get<PointsPool>(`/pools/${id}`),
     byCode: (code: string) => get<PointsPool>(`/pools/code/${code.trim().toUpperCase()}`),

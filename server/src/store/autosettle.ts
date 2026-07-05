@@ -11,18 +11,22 @@ import { openPoolsForFixture, settlePool } from './pools.js';
 
 export function startAutoSettle(): void {
   manager.onLiveChange((ids) => {
-    for (const id of ids) {
-      const s = manager.fixtureSummary(id);
-      if (!s || s.matchStatus !== 'finished' || !s.result) continue;
-      for (const p of openPoolsForFixture(id)) {
-        try {
-          settlePool(p.id, s.result);
-          console.log(`[autosettle] pool ${p.code} settled ${s.result.homeGoals}-${s.result.awayGoals}`);
-        } catch {
-          /* already settled / concurrent — safe to ignore */
+    // Settlement may move real USD₮ on-chain (usdt pools), so it's async; run it
+    // off the listener without blocking other subscribers.
+    void (async () => {
+      for (const id of ids) {
+        const s = manager.fixtureSummary(id);
+        if (!s || s.matchStatus !== 'finished' || !s.result) continue;
+        for (const p of openPoolsForFixture(id)) {
+          try {
+            await settlePool(p.id, s.result);
+            console.log(`[autosettle] pool ${p.code} settled ${s.result.homeGoals}-${s.result.awayGoals}`);
+          } catch {
+            /* already settled / concurrent — safe to ignore */
+          }
         }
       }
-    }
+    })();
   });
   console.log('[autosettle] watching the feed — pools pay out at full time');
 }

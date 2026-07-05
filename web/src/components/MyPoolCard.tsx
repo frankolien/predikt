@@ -29,6 +29,8 @@ export function MyPoolCard({
     me && !settled
       ? impliedReturn(pool.members, me.staked, pool.potPoints, me.prediction.homeGoals, me.prediction.awayGoals, false)
       : null;
+  const unit = pool.currency === "usdt" ? "USD₮" : "pts";
+  const money = (n?: number | null) => usdt(n ?? 0, pool.currency === "usdt" ? 2 : 0);
 
   return (
     <Card className="p-5">
@@ -53,7 +55,7 @@ export function MyPoolCard({
         <div className="flex flex-col gap-1">
           <span className="text-[14px] font-medium text-chalk">{pool.name}</span>
           <span className="label-mono">
-            staked {usdt(me?.staked, 0)} pts · {pool.memberCount} in · pot {usdt(pool.potPoints, 0)}
+            staked {money(me?.staked)} {unit} · {pool.memberCount} in · pot {money(pool.potPoints)}
           </span>
         </div>
       </div>
@@ -62,7 +64,7 @@ export function MyPoolCard({
         <div className="mt-3 border-t border-edge pt-3">
           {me?.won ? (
             <Pill strong className="!border-live !text-live">
-              won +{usdt(me.winnings, 0)} pts{me.exact ? " · exact score" : ""}
+              won +{money(me.winnings)} {unit}{me.exact ? " · exact score" : ""}
             </Pill>
           ) : (
             <Pill>pipped — better luck next round</Pill>
@@ -74,7 +76,7 @@ export function MyPoolCard({
             If {outcomeText(proj.outcome, fixture?.home.name ?? "home", fixture?.away.name ?? "away")} lands
           </span>
           <span className="font-mono text-[13px] text-live">
-            ≈ {usdt(proj.payout, 0)} pts <span className="text-steel">· {oddsLabel(proj.multiple)}</span>
+            ≈ {money(proj.payout)} {unit} <span className="text-steel">· {oddsLabel(proj.multiple)}</span>
           </span>
         </div>
       ) : null}

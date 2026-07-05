@@ -2,21 +2,31 @@
  * Points-based prediction pools (DB-backed, free-to-play).
  *
  * Mirrors the on-chain pool semantics — fixed buy-in, join with a scoreline,
- * settle pro-rata to correct-outcome callers — but with POINTS instead of USDt,
- * so anyone can play with zero wallet/gas/seed friction. Settlement reuses the
- * exact same pure math as the chain path (`settlePool`, decimals = 0). The
- * chain/WDK code stays parked as the future real-money tier.
+ * settle pro-rata to correct-outcome callers. Free-to-play pools run in POINTS
+ * (zero wallet/gas friction); `currency='usdt'` runs the identical flow through
+ * real on-chain USD₮ via the shared treasury escrow. Settlement reuses the same
+ * pure math (`computeSettlement`) in the currency's base unit either way.
  */
 import { randomUUID } from 'node:crypto';
 import { and, desc, eq } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { pools, poolMembers, users } from '../db/schema.js';
 import { adjustPoints } from './accounts.js';
+import { walletAddressOf } from './wallets.js';
+import * as escrow from '../wdk/escrow.js';
 import { getFixture, getTeam } from '../football/index.js';
 import { settlePool as computeSettlement } from '../pool/settlement.js';
 import type { MatchResult } from '../types.js';
 
 const DEFAULT_BUYIN = Number(process.env.GAFFER_BUYIN || 50);
+
+// Buy-in / pot / payouts are stored in the currency's base unit: whole points,
+// or µUSD₮ (×1e6) for real USD₮. Convert only at the store boundary.
+const USDT_UNIT = 1_000_000;
+const toBaseUnit = (human: number, currency: string) =>
+  currency === 'usdt' ? Math.round(human * USDT_UNIT) : Math.round(human);
+const toDisplay = (base: number, currency: string) =>
+  currency === 'usdt' ? base / USDT_UNIT : base;
 
 const clampGoals = (n: unknown) => Math.max(0, Math.min(20, Math.round(Number(n) || 0)));
 
@@ -37,13 +47,15 @@ export function createPool(opts: {
   name?: string;
   buyIn?: number;
   isPublic?: boolean;
+  currency?: 'points' | 'usdt';
 }) {
   const fixture = getFixture(opts.fixtureId);
   if (!fixture) throw new Error('unknown fixture');
   const id = randomUUID();
   const now = new Date();
   const lockTime = Number.isFinite(Date.parse(fixture.kickoff)) ? new Date(Date.parse(fixture.kickoff)) : null;
-  const buyIn = Math.max(0, Math.floor(opts.buyIn ?? DEFAULT_BUYIN));
+  const currency = opts.currency === 'usdt' ? 'usdt' : 'points';
+  const buyIn = toBaseUnit(Math.max(0, opts.buyIn ?? DEFAULT_BUYIN), currency); // points, or µUSD₮
   const name = (opts.name || defaultName(opts.fixtureId)).toString().slice(0, 60);
 
   let code = inviteCode();
@@ -61,6 +73,7 @@ export function createPool(opts: {
       fixtureId: opts.fixtureId,
       creatorId: opts.creatorId,
       buyIn,
+      currency,
       isPublic: opts.isPublic ?? false,
       status: 'open',
       lockTime,
@@ -70,7 +83,7 @@ export function createPool(opts: {
   return getPool(id)!;
 }
 
-export function joinPool(opts: {
+export async function joinPool(opts: {
   poolId?: string;
   code?: string;
   userId: string;
@@ -90,9 +103,12 @@ export function joinPool(opts: {
 
   const predHome = clampGoals(opts.predHome);
   const predAway = clampGoals(opts.predAway);
-  db.transaction((tx) => {
-    adjustPoints(tx, opts.userId, -pool.buyIn, 'stake', pool.id); // throws if insufficient
-    tx.insert(poolMembers)
+
+  // Insert the entry; joins the active BEGIN/COMMIT when called inside a
+  // transaction (points), or runs standalone on the USD₮ path.
+  const writeEntry = (depositTx?: string) =>
+    db
+      .insert(poolMembers)
       .values({
         id: randomUUID(),
         poolId: pool.id,
@@ -100,15 +116,30 @@ export function joinPool(opts: {
         predHome,
         predAway,
         staked: pool.buyIn,
+        depositTx,
         joinedAt: new Date(),
       })
       .run();
-  });
+
+  if (pool.currency === 'usdt') {
+    let depositTx: string | undefined;
+    if (pool.buyIn > 0) {
+      const addr = walletAddressOf(opts.userId);
+      if (!addr) throw new Error('connect a USD₮ wallet first');
+      depositTx = await escrow.collect(addr, BigInt(pool.buyIn)); // real USD₮ → treasury
+    }
+    writeEntry(depositTx);
+  } else {
+    db.transaction((tx) => {
+      adjustPoints(tx, opts.userId, -pool.buyIn, 'stake', pool.id); // throws if insufficient
+      writeEntry();
+    });
+  }
   return getPool(pool.id)!;
 }
 
-/** Settle a pool on a final score: pay points pro-rata to correct-outcome callers. */
-export function settlePool(poolId: string, result: MatchResult) {
+/** Settle a pool on a final score: pay pro-rata to correct-outcome callers. */
+export async function settlePool(poolId: string, result: MatchResult) {
   const pool = poolRow(poolId);
   if (!pool) throw new Error('pool not found');
   if (pool.status === 'settled') throw new Error('pool already settled');
@@ -118,28 +149,52 @@ export function settlePool(poolId: string, result: MatchResult) {
     address: m.userId,
     displayName: m.userId,
     prediction: { homeGoals: m.predHome, awayGoals: m.predAway },
-    stake: m.staked,
+    stake: m.staked, // base units — points, or µUSD₮
     joinedAt: '',
   }));
-  const settlement = computeSettlement(entries, result, 0); // decimals 0 → integer points
+  // decimals 0 → the pure math runs directly in the stored base unit; payout
+  // `baseUnits` are the exact points (or µUSD₮) to move.
+  const settlement = computeSettlement(entries, result, 0);
   const byUser = new Map(settlement.payouts.map((p) => [p.address, p]));
 
-  db.transaction((tx) => {
+  if (pool.currency === 'usdt') {
+    // Real on-chain payouts from the treasury to each winner's wallet.
     for (const m of members) {
       const p = byUser.get(m.userId);
-      const winnings = p ? Math.round(p.amount) : 0;
+      const winnings = p ? Number(p.baseUnits) : 0; // µUSD₮
       const won = !!p?.won;
-      if (winnings > 0) adjustPoints(tx, m.userId, winnings, settlement.refunded ? 'refund' : 'payout', poolId);
-      tx.update(poolMembers)
-        .set({ won, winnings, exact: !!p?.exactScore })
+      let payoutTx: string | undefined;
+      if (winnings > 0) {
+        const addr = walletAddressOf(m.userId);
+        if (addr) payoutTx = await escrow.pay(addr, BigInt(winnings)); // real USD₮ → winner
+      }
+      db.update(poolMembers)
+        .set({ won, winnings, payoutTx, exact: !!p?.exactScore })
         .where(eq(poolMembers.id, m.id))
         .run();
     }
-    tx.update(pools)
+    db.update(pools)
       .set({ status: 'settled', resultHome: result.homeGoals, resultAway: result.awayGoals, settledAt: new Date() })
       .where(eq(pools.id, poolId))
       .run();
-  });
+  } else {
+    db.transaction((tx) => {
+      for (const m of members) {
+        const p = byUser.get(m.userId);
+        const winnings = p ? Math.round(p.amount) : 0;
+        const won = !!p?.won;
+        if (winnings > 0) adjustPoints(tx, m.userId, winnings, settlement.refunded ? 'refund' : 'payout', poolId);
+        tx.update(poolMembers)
+          .set({ won, winnings, exact: !!p?.exactScore })
+          .where(eq(poolMembers.id, m.id))
+          .run();
+      }
+      tx.update(pools)
+        .set({ status: 'settled', resultHome: result.homeGoals, resultAway: result.awayGoals, settledAt: new Date() })
+        .where(eq(pools.id, poolId))
+        .run();
+    });
+  }
   return getPool(poolId)!;
 }
 
@@ -158,6 +213,8 @@ export function getPool(id: string) {
       won: poolMembers.won,
       winnings: poolMembers.winnings,
       exact: poolMembers.exact,
+      depositTx: poolMembers.depositTx,
+      payoutTx: poolMembers.payoutTx,
       joinedAt: poolMembers.joinedAt,
     })
     .from(poolMembers)
@@ -166,28 +223,32 @@ export function getPool(id: string) {
     .orderBy(poolMembers.joinedAt)
     .all();
 
-  const pot = rows.reduce((a, m) => a + m.staked, 0);
+  const potBase = rows.reduce((a, m) => a + m.staked, 0); // base units (µUSD₮ for usdt)
+  const disp = (n: number) => toDisplay(n, pool.currency);
   return {
     id: pool.id,
     code: pool.code,
     name: pool.name,
     fixtureId: pool.fixtureId,
-    buyIn: pool.buyIn,
+    buyIn: disp(pool.buyIn),
+    currency: pool.currency,
     isPublic: pool.isPublic,
     status: pool.status,
     lockTime: pool.lockTime ? pool.lockTime.toISOString() : null,
     result: pool.resultHome != null && pool.resultAway != null ? { homeGoals: pool.resultHome, awayGoals: pool.resultAway } : null,
-    potPoints: pot,
+    potPoints: disp(potBase),
     memberCount: rows.length,
     createdAt: pool.createdAt.toISOString(),
     members: rows.map((m) => ({
       userId: m.userId,
       handle: m.handle,
       prediction: { homeGoals: m.predHome, awayGoals: m.predAway },
-      staked: m.staked,
+      staked: disp(m.staked),
       won: m.won ?? null,
-      winnings: m.winnings ?? null,
+      winnings: m.winnings == null ? null : disp(m.winnings),
       exact: m.exact ?? false,
+      depositTx: m.depositTx ?? null,
+      payoutTx: m.payoutTx ?? null,
     })),
   };
 }

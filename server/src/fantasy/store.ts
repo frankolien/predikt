@@ -4,13 +4,16 @@
  * Build a valid XI under budget, join a league (buy-in debited to the ledger),
  * points are scored live from the fixture feed, and the pot pays out by rank at
  * settlement. Squad validation + auto-draft are deterministic; the Gaffer only
- * narrates (see ai.ts). Money only moves inside a `db.transaction`.
+ * narrates (see ai.ts). Buy-ins/payouts move as points inside a `db.transaction`,
+ * or as real on-chain USD₮ via the shared treasury escrow when `currency='usdt'`.
  */
 import { randomUUID } from 'node:crypto';
 import { and, eq, or } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { fantasyLeagues, fantasySquads, fantasySquadPlayers, users } from '../db/schema.js';
 import { adjustPoints } from '../store/accounts.js';
+import { walletAddressOf } from '../store/wallets.js';
+import * as escrow from '../wdk/escrow.js';
 import * as manager from '../pool/manager.js';
 import { BUDGET, SQUAD_SIZE, XI_SIZE, MAX_PER_TEAM, SQUAD_QUOTA, XI_QUOTA, type Player, type Position } from './players.js';
 import { getPool, getPlayer } from './squads.js';
@@ -18,6 +21,14 @@ import { scoreLineup, scoreTeam, type ScoreFixture, type Chip, type LineupPlayer
 
 // Budget/prices are kept as integers ×10 (one decimal place) internally.
 const P10 = (n: number) => Math.round(n * 10);
+
+// Buy-in / pot / payouts are stored in the currency's base unit: whole points,
+// or µUSD₮ (×1e6) for real USD₮. Convert only at the store boundary.
+const USDT_UNIT = 1_000_000;
+const toBaseUnit = (human: number, currency: string) =>
+  currency === 'usdt' ? Math.round(human * USDT_UNIT) : Math.round(human);
+const toDisplay = (base: number, currency: string) =>
+  currency === 'usdt' ? base / USDT_UNIT : base;
 
 export function listPlayers(): Player[] {
   return getPool();
@@ -276,7 +287,8 @@ export function createLeague(opts: {
   currency?: 'points' | 'usdt';
 }) {
   const name = (opts.name || 'Fantasy League').toString().trim().slice(0, 60) || 'Fantasy League';
-  const buyIn = Math.max(0, Math.floor(opts.buyIn ?? 0));
+  const currency = opts.currency === 'usdt' ? 'usdt' : 'points';
+  const buyIn = toBaseUnit(Math.max(0, opts.buyIn ?? 0), currency); // points, or µUSD₮
   let split = opts.splitBps && opts.splitBps.length ? opts.splitBps.map((n) => Math.round(n)) : [10000];
   split = split.filter((n) => n > 0);
   if (!split.length || split.reduce((a, b) => a + b, 0) !== 10000) throw new Error('prize split must total 100%');
@@ -294,7 +306,7 @@ export function createLeague(opts: {
       name,
       creatorId: opts.creatorId,
       buyIn,
-      currency: opts.currency === 'usdt' ? 'usdt' : 'points',
+      currency,
       splitBps: JSON.stringify(split),
       status: 'open',
       createdAt: new Date(),
@@ -303,7 +315,7 @@ export function createLeague(opts: {
   return getLeague(id)!;
 }
 
-export function joinLeague(opts: {
+export async function joinLeague(opts: {
   code?: string;
   leagueId?: string;
   userId: string;
@@ -338,10 +350,12 @@ export function joinLeague(opts: {
     .sort((a, b) => b.price - a.price)
     .forEach((p, i) => benchOrder.set(p.id, i + 1));
 
-  db.transaction((tx) => {
-    if (lg.buyIn > 0) adjustPoints(tx, opts.userId, -lg.buyIn, 'stake', lg.id);
+  // Insert the squad + its 15 players. Executes on the shared connection, so it
+  // joins the active BEGIN/COMMIT when called inside `db.transaction` (points),
+  // and runs standalone on the USD₮ path (money already moved on-chain).
+  const writeSquad = (depositTx?: string) => {
     const squadId = randomUUID();
-    tx.insert(fantasySquads)
+    db.insert(fantasySquads)
       .values({
         id: squadId,
         leagueId: lg.id,
@@ -351,12 +365,13 @@ export function joinLeague(opts: {
         chip,
         budgetUsed: budgetUsed10,
         staked: lg.buyIn,
+        depositTx,
         createdAt: new Date(),
       })
       .run();
     for (const p of players) {
       const isStarter = starterSet.has(p.id);
-      tx.insert(fantasySquadPlayers)
+      db.insert(fantasySquadPlayers)
         .values({
           id: randomUUID(),
           squadId,
@@ -366,7 +381,22 @@ export function joinLeague(opts: {
         })
         .run();
     }
-  });
+  };
+
+  if (lg.currency === 'usdt') {
+    let depositTx: string | undefined;
+    if (lg.buyIn > 0) {
+      const addr = walletAddressOf(opts.userId);
+      if (!addr) throw new Error('connect a USD₮ wallet first');
+      depositTx = await escrow.collect(addr, BigInt(lg.buyIn)); // real USD₮ → treasury
+    }
+    writeSquad(depositTx);
+  } else {
+    db.transaction((tx) => {
+      if (lg.buyIn > 0) adjustPoints(tx, opts.userId, -lg.buyIn, 'stake', lg.id);
+      writeSquad();
+    });
+  }
   return getLeague(lg.id)!;
 }
 
@@ -379,7 +409,7 @@ export function startLeague(opts: { leagueId: string; creatorId: string }) {
   return getLeague(lg.id)!;
 }
 
-export function settleLeague(opts: { leagueId: string; creatorId: string }) {
+export async function settleLeague(opts: { leagueId: string; creatorId: string }) {
   const lg = row(opts.leagueId);
   if (!lg) throw new Error('league not found');
   if (lg.creatorId !== opts.creatorId) throw new Error('only the creator can settle');
@@ -388,7 +418,17 @@ export function settleLeague(opts: { leagueId: string; creatorId: string }) {
   const view = getLeague(lg.id)!;
   const ranked = view.standings; // already sorted, rank assigned
   const split = parseSplit(lg.splitBps);
-  const pot = ranked.reduce((a, s) => a + s.staked, 0);
+  // The view exposes `staked` in DISPLAY units; settlement math (and escrow.pay)
+  // must run in BASE units, so read the raw stakes straight from the DB.
+  const stakedBase = new Map(
+    db
+      .select({ id: fantasySquads.id, staked: fantasySquads.staked })
+      .from(fantasySquads)
+      .where(eq(fantasySquads.leagueId, lg.id))
+      .all()
+      .map((r) => [r.id, r.staked]),
+  );
+  const pot = ranked.reduce((a, s) => a + (stakedBase.get(s.squadId) ?? 0), 0);
 
   // Conserved integer payout by placement; dust to the winner.
   const payout = new Map<string, number>();
@@ -405,17 +445,34 @@ export function settleLeague(opts: { leagueId: string; creatorId: string }) {
     if (dust > 0) payout.set(ranked[0].squadId, (payout.get(ranked[0].squadId) ?? 0) + dust);
   }
 
-  db.transaction((tx) => {
-    ranked.forEach((s, i) => {
+  if (lg.currency === 'usdt') {
+    // Real on-chain payouts from the treasury to each winner's wallet.
+    for (const [i, s] of ranked.entries()) {
       const won = payout.get(s.squadId) ?? 0;
-      if (won > 0) adjustPoints(tx, s.userId, won, 'payout', lg.id);
-      tx.update(fantasySquads)
-        .set({ placement: i + 1, payout: won > 0 ? won : null })
+      let payoutTx: string | undefined;
+      if (won > 0) {
+        const addr = walletAddressOf(s.userId);
+        if (addr) payoutTx = await escrow.pay(addr, BigInt(won)); // real USD₮ → winner
+      }
+      db.update(fantasySquads)
+        .set({ placement: i + 1, payout: won > 0 ? won : null, payoutTx })
         .where(eq(fantasySquads.id, s.squadId))
         .run();
+    }
+    db.update(fantasyLeagues).set({ status: 'settled', settledAt: new Date() }).where(eq(fantasyLeagues.id, lg.id)).run();
+  } else {
+    db.transaction((tx) => {
+      ranked.forEach((s, i) => {
+        const won = payout.get(s.squadId) ?? 0;
+        if (won > 0) adjustPoints(tx, s.userId, won, 'payout', lg.id);
+        tx.update(fantasySquads)
+          .set({ placement: i + 1, payout: won > 0 ? won : null })
+          .where(eq(fantasySquads.id, s.squadId))
+          .run();
+      });
+      tx.update(fantasyLeagues).set({ status: 'settled', settledAt: new Date() }).where(eq(fantasyLeagues.id, lg.id)).run();
     });
-    tx.update(fantasyLeagues).set({ status: 'settled', settledAt: new Date() }).where(eq(fantasyLeagues.id, lg.id)).run();
-  });
+  }
   return getLeague(lg.id)!;
 }
 
@@ -453,6 +510,8 @@ export interface Standing {
   placement: number | null;
   payout: number | null;
   staked: number;
+  depositTx: string | null; // USD₮ buy-in tx hash (usdt leagues)
+  payoutTx: string | null; // USD₮ payout tx hash (usdt leagues)
   players: StandingPlayer[];
 }
 export interface LeagueView {
@@ -533,23 +592,33 @@ export function getLeague(id: string): LeagueView | null {
       placement: sq.placement,
       payout: sq.payout,
       staked: sq.staked,
+      depositTx: sq.depositTx ?? null,
+      payoutTx: sq.payoutTx ?? null,
       players: standingPlayers,
     };
   });
 
   rows.sort((a, b) => b.points - a.points || a.budgetUsed - b.budgetUsed);
-  const standings: Standing[] = rows.map((r, i) => ({ ...r, rank: i + 1 }));
+  const potBase = rows.reduce((a, s) => a + s.staked, 0); // base units (µUSD₮ for usdt)
+  const disp = (n: number) => toDisplay(n, lg.currency);
+  // Money fields (buy-in / pot / stake / payout) leave the store in display units.
+  const standings: Standing[] = rows.map((r, i) => ({
+    ...r,
+    rank: i + 1,
+    staked: disp(r.staked),
+    payout: r.payout == null ? null : disp(r.payout),
+  }));
 
   return {
     id: lg.id,
     code: lg.code,
     name: lg.name,
     creatorId: lg.creatorId,
-    buyIn: lg.buyIn,
+    buyIn: disp(lg.buyIn),
     currency: lg.currency,
     status: lg.status,
     splitBps: parseSplit(lg.splitBps),
-    pot: standings.reduce((a, s) => a + s.staked, 0),
+    pot: disp(potBase),
     memberCount: standings.length,
     createdAt: lg.createdAt.toISOString(),
     lockedAt: lg.lockedAt ? lg.lockedAt.toISOString() : null,
