@@ -1,0 +1,29 @@
+{
+  "name": "gaffer",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Self-custodial football prediction pools with a private, on-device AI pundit. Tether Developers Cup — QVAC + WDK.",
+  "license": "MIT",
+  "type": "module",
+  "workspaces": [
+    "server",
+    "web"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "b4a": "1.8.1"
+  },
+  "scripts": {
+    "setup": "npm install && npm run contracts:build",
+    "demo": "node scripts/demo.mjs",
+    "chain": "anvil --silent",
+    "contracts:build": "forge build --root contracts",
+    "server": "npm -w server run dev",
+    "web": "npm -w web run dev"
+  },
+  "devDependencies": {
+    "puppeteer-core": "^25.3.0"
+  }
+}

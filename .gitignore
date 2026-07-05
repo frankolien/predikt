@@ -1,0 +1,53 @@
+# dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# builds
+dist/
+build/
+out/
+web/dist/
+server/dist/
+
+# QVAC on-device model cache (large weights — never commit)
+.qvac/
+models/
+*.gguf
+*.bin
+
+# local chain / contract artifacts
+contracts/out/
+contracts/cache/
+contracts/broadcast/
+.anvil.log
+deployments.local.json
+
+# env & secrets (self-custodial: seeds/keys never leave the machine, never commit them)
+.env
+.env.*
+!.env.example
+*.seed
+wallets.local.json
+
+# local dev database (SQLite) — schema lives in server/drizzle/, data is disposable
+server/gaffer.db
+server/gaffer.db-shm
+server/gaffer.db-wal
+*.db
+*.db-shm
+*.db-wal
+
+# logs & os
+*.log
+.DS_Store
+npm-debug.log*
+yarn-error.log*
+
+# editors
+.vscode/
+.idea/
+
+# claude code — local machine settings (permission paths are machine-specific)
+.claude/
+CLAUDE.local.md
