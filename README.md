@@ -1,177 +1,105 @@
 <div align="center">
 
-# 🏴 Gaffer
+# 🏴 Predikt
 
-### *your keys, your model, your call*
+**Self-custodial football games on USD₮.**
 
-**Self-custodial football prediction pools with a private, on-device AI pundit.**
+Predict live World Cup ties, run knockout cups, and play fantasy — all under one wallet whose keys never leave your device.
 
-Built for the **Tether Developers Cup** on the **QVAC** (local AI) + **WDK** (self-custodial wallets) tracks.
+Built on **WDK** (Tether's self-custodial wallet SDK) for the **Tether Developers Cup**.
 
-`self-custodial money` · `self-custodial intelligence`
+**Live → [prediktt.xyz](https://prediktt.xyz)**
 
 </div>
 
 ---
 
-## The idea in one line
+## What it is
 
-> Around a big tournament, mates run a prediction sweepstake — but with Gaffer **nobody holds the
-> pot** and **nobody sees your bets**. The stakes are self-custodial USDt held by an on-chain escrow
-> contract. The pundit is an LLM that runs **entirely on your device**.
+An all-in-one football economy. Four ways to play, one self-custodial USD₮ wallet under all of them:
 
-That single thesis — *self-custodial money **and** self-custodial intelligence* — is what makes
-QVAC + WDK feel like **one product** instead of two SDKs bolted together. You hold your keys (WDK)
-**and** you hold your model (QVAC).
+- **Predict** — call the score on live ties, pool up with mates by invite code, split the pot at full time.
+- **Organize** — run a knockout cup with a real entry fee; the pot auto-pays the winner.
+- **Fantasy** — draft a salary-cap XI from real World Cup squads and climb mini-leagues for a prize pool.
+- **Free or real** — play in points, or stake real on-chain USD₮ any time.
 
-Every "AI betting tip" product on earth is a cloud service that harvests your data. Gaffer is the
-exact inverse: the AI runs on your device and never phones home. That inversion is the point.
+**Nobody holds the pot.** Buy-ins go into an on-chain escrow contract; payouts settle on-chain straight to your wallet with a real tx hash. The server never custodies funds — the contract does.
 
-## What it does — the demo loop
+## Why WDK
 
-1. **Own your keys.** A self-custodial wallet is generated locally with **WDK**. The seed never
-   leaves the machine; the server never sees your private key.
-2. **Ask the Gaffer.** An LLM running **entirely on-device via QVAC** streams you a private read of
-   the tie — form analysis, a called scoreline, a confidence, and a spicy hot-take. Pull the network
-   cable; it still works.
-3. **Call it & stake.** You sign an `approve` + `deposit` and your USDt goes into an on-chain
-   **PredictionPool** escrow. No human custodies the funds — the contract does.
-4. **Get paid by rule.** At full time a result oracle posts the score, and the contract pays every
-   correct-outcome caller their pro-rata share of the pot — automatically, to their self-custodial
-   wallet.
+Every wallet, USD₮ balance, `approve`, and escrow `deposit`/payout runs on [`@tetherto/wdk-wallet-evm`](https://github.com/tetherto). The 12-word recovery phrase is generated **on your device** and *is* your login — the same phrase recovers your whole account (points, pools, squads, cups) on any device, and the server never sees your private key.
 
-The whole thing runs **offline on one laptop**: local AI (QVAC) + a local chain + self-custodial
-wallets (WDK). No cloud, no API keys, no real funds.
+> **Your keys, your money.** That's the entire product.
 
-## Why both tracks are load-bearing
+## Try it
 
-| | How it's used | Remove it and… |
-| --- | --- | --- |
-| **QVAC** (local AI) | The Gaffer's analysis/scoreline/hot-take is real on-device LLM inference (`@qvac/sdk`, Llama 3.2 1B on Apple-Silicon Metal), streamed token-by-token. See [`server/src/qvac`](server/src/qvac). | …there's no private pundit. The core UX is gone. |
-| **WDK** (self-custody) | Each fan's wallet, USDt balance, `approve`, and the escrow `deposit` are driven by `@tetherto/wdk-wallet-evm` — including arbitrary contract calls via `sendTransaction({to,value,data})`. See [`server/src/wdk`](server/src/wdk). | …no self-custodial stakes or payouts. The money layer is gone. |
+- **Hosted:** **[prediktt.xyz](https://prediktt.xyz)** — the full product on a bundled demo chain. No install: grab a wallet, create a pool, join a cup, all live against real World Cup 2026 fixtures.
+- **Local:** run it on your machine (below).
 
-Neither is a logo skin. This is the judging criterion "real use of your track" taken literally.
-
-## Try it — two ways
-
-**Hosted (instant, in your browser):**
-**https://glistening-reverence-production-c01a.up.railway.app**
-The full product on a bundled demo chain — self-custodial USD₮ wallets, prediction pools, fantasy
-leagues, knockout cups, and **real, live** World Cup 2026 matches. The Gaffer here runs the
-**scripted** pundit on purpose: QVAC is on-device by design — its Bare + llama.cpp runtime targets
-the user's own machine, not a shared cloud container — so the hosted link showcases everything
-*except* live inference.
-
-**On-device (the real QVAC):** run it locally (below) and the Gaffer's analysis, scoreline and
-hot-take become **real Llama 3.2 1B inference on your machine**, streamed token-by-token, nothing
-leaving the device. That's the track taken literally: *your keys, your model, your call.*
-
-## Quick start
+## Run it locally
 
 **Prerequisites**
-- **Node ≥ 22.17** (QVAC needs it; check with `node -v`)
+- **Node ≥ 20**
 - **Foundry** (for the local `anvil` chain): `curl -L https://foundry.paradigm.xyz | bash && foundryup`
-- macOS 14+ on Apple Silicon is the smoothest path for on-device inference (Metal). Linux/Windows
-  work too (Vulkan). ≥ 5 GB free disk for the model, ≥ 4 GB RAM.
+- A **Postgres** to point at (`DATABASE_URL`), or use the bundled default.
 
-**Run it**
 ```bash
 npm run setup     # install deps + compile contracts
-npm run demo      # boots anvil + API + web, all local
-```
-Then open **http://localhost:5173**.
-
-> First run downloads the on-device model (~773 MB, cached in `~/.qvac/models`). The UI shows a live
-> loading state while it warms up — the rest of the app is usable immediately.
-
-**Or run the pieces yourself**
-```bash
-npm run chain     # terminal 1 — local anvil chain
-npm run server    # terminal 2 — API (deploys contracts, loads model, seeds a pool)
-npm run web       # terminal 3 — Vite UI on :5173
+npm run demo      # boots anvil + API + web, all local → http://localhost:5173
 ```
 
-## Beyond the core loop
+## Deploy
 
-- **Live in-play tracker** — once a match kicks off (real feed, pushed over SSE in ~1s, or the demo "simulate live" control), the room becomes a live tracker: live score + a ticking minute, a "who's winning now" board across everyone in the pool, and the **Gaffer reacting on-device** as the score changes. At full time the real score auto-fills the settle oracle.
-- **On-device voice pundit** — the Gaffer can **speak** its read aloud (QVAC Supertonic TTS) and you can **ask by voice** (record → on-device Whisper STT → streamed answer, which you can also hear). All local; speech models lazy-load on first use.
-- **Telegram bot** — a companion bot over the same API (see below).
-- **Light / dark** — a monochrome theme toggle in the nav, persisted.
-- **Two pages** — a landing page and a dedicated `/room/:fixtureId` match room.
+Two-service split (see [`DEPLOY.md`](DEPLOY.md) for the full walkthrough):
 
-## Live data — real-time
+- **Backend** → Railway: the Fastify API + a bundled `anvil` demo chain, single container ([`Dockerfile`](Dockerfile)). Data lives in a **Railway Postgres**.
+- **Frontend** → Vercel: the built SPA (root dir `web/`), pointed at the backend with `VITE_API_BASE`. Custom domain on `prediktt.xyz`.
 
-Match fixtures, results, team form, crests **and live in-play scores** are **real and live** — FIFA
-World Cup 2026. Two providers, same code path:
+The SPA calls the API cross-origin (fetch + SSE); the server allows it (`CORS`), so no proxy is needed.
 
-- **football-data.org** (set `FOOTBALL_DATA_API_KEY` in `.env`) — true in-play `IN_PLAY` status +
-  live scores. Its free tier omits the live *minute*, so we derive a ticking clock from kickoff.
-- **TheSportsDB** (keyless fallback, zero setup) — real fixtures/results/form; best-effort live state.
+## Live data
 
-The server polls the feed every **15s** and **pushes** every score/status/minute change to the
-browser over a single SSE connection (`/api/stream`) the instant it's detected — so a goal lands in
-the UI in about a second, not on a poll tick. The marquee pool auto-resolves to the soonest open tie;
-if the feed is unreachable at boot, it falls back to a bundled offline dataset and keeps retrying.
+Fixtures, results, form, crests **and live in-play scores** are real — FIFA World Cup 2026, two providers behind one code path:
 
-Only the *match data* comes from a feed — the **AI (QVAC) and wallets (WDK) stay fully local**.
+- **football-data.org** — set `FOOTBALL_DATA_API_KEY` for true in-play status + scores.
+- **TheSportsDB** — keyless fallback, zero setup.
 
-## Telegram bot
-
-A [grammy](https://grammy.dev) companion bot (a thin client over the localhost API) lives in
-[`server/src/telegram/`](server/src/telegram/). Browse fixtures, get the on-device Gaffer's read,
-create a self-custodial wallet, join pools, and get DM'd when a pool settles — all from Telegram.
-
-```bash
-cd server
-TELEGRAM_BOT_TOKEN=<token-from-@BotFather> npm run bot   # GAFFER_API defaults to http://127.0.0.1:8787
-```
-
-Commands: `/start` `/fixtures` `/gaffer <id>` `/wallet` `/join <id> <h>-<a>` `/pool <id>` `/me`.
-Note: it stores wallet seeds in memory for the demo only — a production bot must never hold seeds.
+The server polls every **15s** and **pushes** each change to the browser over one SSE connection (`/api/stream`), so a goal lands in the UI in about a second. If the feed is unreachable at boot it falls back to a bundled dataset and keeps retrying.
 
 ## Modes
 
-- **`local`** (default) — a local `anvil` chain + a `MockUSDT` we deploy, so a judge needs zero real
-  funds and zero keys. Fully offline and deterministic. This *is* the ethos of both tracks.
-- **`testnet`** — set `GAFFER_MODE=testnet`, `GAFFER_RPC_URL`, `GAFFER_OPERATOR_KEY`,
-  `GAFFER_USDT_ADDRESS` to point WDK at a real testnet + real USDT/USD₮0. Same code paths.
+- **`local`** (default) — a local `anvil` chain + a `MockUSDT` we deploy, so a judge needs zero real funds and zero keys. Fully offline and deterministic.
+- **`testnet`** — set `GAFFER_MODE=testnet`, `GAFFER_RPC_URL`, `GAFFER_OPERATOR_KEY`, `GAFFER_USDT_ADDRESS` to point WDK at a real testnet + real USD₮0. Same code paths.
 
 ## Architecture
 
 ```
-web/  (Vite + React + Tailwind v4 + motion)   ── HTTP / SSE ──▶  server/  (Node + tsx, localhost)
-  floodlit "matchday broadsheet" UI                                 ├─ qvac/  → @qvac/sdk   (on-device LLM)     ← QVAC
-                                                                     ├─ wdk/   → @tetherto/wdk-wallet-evm         ← WDK
-                                                                     ├─ chain/ → viem (operator/oracle, reads)
-                                                                     └─ pool/  → settlement + manager
-contracts/  (Foundry)  PredictionPool.sol (on-chain-settlement escrow) + MockUSDT.sol
+web/  (Vite + React + Tailwind)  ──HTTP / SSE──▶  server/  (Fastify + Node)
+  hosted on Vercel → prediktt.xyz                   ├─ wdk/      → @tetherto/wdk-wallet-evm  (self-custodial wallets)  ← WDK
+                                                    ├─ chain/    → viem (operator/oracle + reads)
+                                                    ├─ store/    → accounts, pools, fantasy, cups  (Drizzle + Postgres)
+                                                    └─ football/ → live WC 2026 feed (SSE push)
+  hosted on Railway + Railway Postgres
+contracts/  (Foundry)  PredictionPool.sol (on-chain escrow) + MockUSDT.sol
 ```
-
-See [`docs/CONCEPT.md`](docs/CONCEPT.md) for the full concept and [`docs/SDK-NOTES.md`](docs/SDK-NOTES.md)
-for the verified QVAC/WDK API notes this is built on.
 
 ## Repo structure
 
 | Path | What |
 | --- | --- |
-| `server/src/qvac/` | On-device pundit — engine (`@qvac/sdk`), prompt/parse, SSE service |
-| `server/src/wdk/` | Self-custodial fan wallets (`@tetherto/wdk-wallet-evm`) |
+| `server/src/wdk/` | Self-custodial wallets (`@tetherto/wdk-wallet-evm`) + escrow treasury |
 | `server/src/chain/` | viem operator/oracle: deploy, fund, settle, reads |
-| `server/src/pool/` | Deterministic settlement + the stateful pool manager |
+| `server/src/store/` | Accounts, points, pools, fantasy, cups (Drizzle ORM → Postgres) |
+| `server/src/football/` | Live WC 2026 feed + SSE push |
 | `contracts/src/` | `PredictionPool.sol`, `MockUSDT.sol` |
 | `web/src/` | React UI (Tailwind v4 design system, `motion` animations) |
-| `scripts/demo.mjs` | One-command local demo orchestrator |
 
-## Honesty notes
+## Notes
 
-- Gaffer is a **fan/entertainment sweepstake** demo, not a licensed gambling product.
-- The default demo uses a local chain + mock USDT so it's reproducible; the same code targets testnet.
-- If the QVAC model can't load in a given environment, the pundit falls back to a clearly-labelled
-  scripted mode (`GAFFER_MOCK_AI=1`) so a live demo never hard-crashes — real on-device inference is
-  the default and headline path.
-- We only claim what we built during the event. Third-party components: `@qvac/sdk`,
-  `@tetherto/wdk-wallet-evm`, `viem`, `fastify`, `react`, `tailwindcss`, `motion`, `foundry`.
+- Predikt is a **fan/entertainment sweepstake** demo, not a licensed gambling product.
+- The default demo uses a local chain + `MockUSDT` so it's reproducible; the same code targets testnet.
+- The repo also contains an optional **on-device AI pundit** (QVAC, `@qvac/sdk`) that runs locally via `npm run demo`. It runs natively on your machine, not in the cloud, so it isn't part of the hosted product.
 
 ## License
 
-[MIT](LICENSE) — Gaffer Contributors, 2026.
+[MIT](LICENSE) — Predikt Contributors, 2026.
