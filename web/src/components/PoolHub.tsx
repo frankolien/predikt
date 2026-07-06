@@ -94,7 +94,20 @@ export function PoolHub({
       const pool = await api.pools.create(fixture.id, { name: name.trim() || undefined, buyIn, isPublic: true, currency });
       return (await api.pools.join({ poolId: pool.id, prediction })).pool;
     });
-  const joinByCode = () => wrap(async () => (await api.pools.join({ code: code.trim(), prediction })).pool);
+  const joinByCode = () =>
+    wrap(async () => {
+      const c = code.trim();
+      try {
+        return (await api.pools.join({ code: c, prediction })).pool;
+      } catch (e) {
+        // Already in this pool? That's not a failure — just open it so you land
+        // on your existing entry instead of a dead-end error.
+        if ((e as Error).message.toLowerCase().includes("already joined")) {
+          return await api.pools.byCode(c);
+        }
+        throw e;
+      }
+    });
   const joinPublic = (p: PointsPool) => wrap(async () => (await api.pools.join({ poolId: p.id, prediction })).pool);
 
   return (

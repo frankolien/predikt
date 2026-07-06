@@ -15,6 +15,7 @@ import { Leaderboard } from "../components/Leaderboard";
 import { Onboard } from "../components/Onboard";
 import { VoiceAsk } from "../components/VoiceAsk";
 import { useVoiceStatus } from "../lib/useVoice";
+import { useToast } from "../components/Toast";
 import { Card, Eyebrow } from "../components/ui";
 import { Lock } from "lucide-react";
 
@@ -22,6 +23,7 @@ export default function Room() {
   const { health, account, refreshAccount } = useApp();
   const { fixtureId } = useParams();
   const navigate = useNavigate();
+  const notify = useToast();
   const voiceStatus = useVoiceStatus();
 
   const [fixtures, setFixtures] = useState<FixtureSummary[]>([]);
@@ -107,6 +109,15 @@ export default function Room() {
     setActivePool(pool);
     refreshAccount();
     setLbKey((k) => k + 1);
+    // An invite code can be for a *different* tie than the one you're viewing.
+    // Jump to that fixture so the pool actually shows — otherwise the
+    // fixture-keyed reload nulls it out and it looks like nothing happened.
+    if (pool.fixtureId !== fixtureId) {
+      navigate(`/room/${pool.fixtureId}`);
+      notify(`You're in — ${pool.name}. Your call is locked in.`);
+    } else {
+      notify(`You're in — ${pool.name}.`);
+    }
   };
 
   if (!ready) return <BootScreen health={health} />;
@@ -154,7 +165,17 @@ export default function Room() {
           {account &&
             fixture &&
             (activePool ? (
-              <MyPoolCard pool={activePool} fixture={fixture} meId={account.id} />
+              <MyPoolCard
+                pool={activePool}
+                fixture={fixture}
+                meId={account.id}
+                onChange={(next) => {
+                  setActivePool(next);
+                  refreshAccount();
+                  setLbKey((k) => k + 1);
+                  if (!next) notify("You left the pool — stake refunded.");
+                }}
+              />
             ) : canJoin ? (
               <PoolHub fixture={fixture} prefill={prefill} onEntered={onEntered} />
             ) : (

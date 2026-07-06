@@ -404,6 +404,9 @@ export const api = {
     byCode: (code: string) => get<PointsPool>(`/pools/code/${code.trim().toUpperCase()}`),
     join: (args: { poolId?: string; code?: string; prediction: { homeGoals: number; awayGoals: number } }) =>
       post<{ pool: PointsPool; account: Account }>("/pools/join", args),
+    updatePrediction: (id: string, prediction: { homeGoals: number; awayGoals: number }) =>
+      post<{ pool: PointsPool }>(`/pools/${id}/prediction`, { prediction }),
+    leave: (id: string) => post<{ pool: PointsPool | null; account: Account }>(`/pools/${id}/leave`, {}),
     mine: () => get<{ pools: PointsPool[] }>("/me/pools"),
     forFixture: (fixtureId: string) => get<{ pools: PointsPool[] }>(`/fixtures/${fixtureId}/pools`),
   },

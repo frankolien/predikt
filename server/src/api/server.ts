@@ -150,6 +150,38 @@ export function buildApp() {
     }
   });
 
+  // Change your call while the pool is still open (before kick-off).
+  app.post('/api/pools/:id/prediction', async (req, reply) => {
+    const a = await authed(req);
+    if (!a) return reply.code(401).send({ error: 'sign in first' });
+    const { id } = req.params as { id: string };
+    const b = (req.body ?? {}) as { prediction?: { homeGoals?: number; awayGoals?: number } };
+    try {
+      const pool = await store.updatePrediction({
+        poolId: id,
+        userId: a.id,
+        predHome: b.prediction?.homeGoals ?? 0,
+        predAway: b.prediction?.awayGoals ?? 0,
+      });
+      return { pool };
+    } catch (err) {
+      return reply.code(400).send({ error: (err as Error).message });
+    }
+  });
+
+  // Leave an open pool before kick-off — refunds the stake.
+  app.post('/api/pools/:id/leave', async (req, reply) => {
+    const a = await authed(req);
+    if (!a) return reply.code(401).send({ error: 'sign in first' });
+    const { id } = req.params as { id: string };
+    try {
+      const pool = await store.leavePool({ poolId: id, userId: a.id });
+      return { pool, account: await accounts.getAccount(a.id) };
+    } catch (err) {
+      return reply.code(400).send({ error: (err as Error).message });
+    }
+  });
+
   app.get('/api/me/pools', async (req, reply) => {
     const a = await authed(req);
     if (!a) return reply.code(401).send({ error: 'sign in first' });

@@ -136,6 +136,79 @@ export async function joinPool(opts: {
   return (await getPool(pool.id))!;
 }
 
+/**
+ * Change your call while the pool is still open (before kick-off). Everyone in a
+ * pool keeps their OWN prediction, so this only touches the caller's entry.
+ */
+export async function updatePrediction(opts: {
+  poolId: string;
+  userId: string;
+  predHome: number;
+  predAway: number;
+}) {
+  const pool = await poolRow(opts.poolId);
+  if (!pool) throw new Error('pool not found');
+  if (pool.status !== 'open') throw new Error('pool is closed');
+  if (pool.lockTime && pool.lockTime.getTime() <= Date.now()) throw new Error('pool locked — the tie kicked off');
+  const member = (
+    await db
+      .select({ id: poolMembers.id })
+      .from(poolMembers)
+      .where(and(eq(poolMembers.poolId, pool.id), eq(poolMembers.userId, opts.userId)))
+      .limit(1)
+  )[0];
+  if (!member) throw new Error('you are not in this pool');
+  await db
+    .update(poolMembers)
+    .set({ predHome: clampGoals(opts.predHome), predAway: clampGoals(opts.predAway) })
+    .where(eq(poolMembers.id, member.id));
+  return (await getPool(pool.id))!;
+}
+
+/**
+ * Leave an open pool before kick-off — refunds the stake in full. Lets a player
+ * back out of their own pool to go join a mate's instead. If the pool empties,
+ * it's retired so it stops showing up in discovery. Returns the updated pool, or
+ * `null` when the pool was removed.
+ */
+export async function leavePool(opts: { poolId: string; userId: string }) {
+  const pool = await poolRow(opts.poolId);
+  if (!pool) throw new Error('pool not found');
+  if (pool.status !== 'open') throw new Error('pool is closed');
+  if (pool.lockTime && pool.lockTime.getTime() <= Date.now()) throw new Error('pool locked — the tie kicked off');
+  const member = (
+    await db
+      .select({ id: poolMembers.id, staked: poolMembers.staked })
+      .from(poolMembers)
+      .where(and(eq(poolMembers.poolId, pool.id), eq(poolMembers.userId, opts.userId)))
+      .limit(1)
+  )[0];
+  if (!member) throw new Error('you are not in this pool');
+
+  if (pool.currency === 'usdt') {
+    if (member.staked > 0) {
+      const addr = await walletAddressOf(opts.userId);
+      if (addr) await escrow.pay(addr, BigInt(member.staked)); // refund real USD₮ from treasury
+    }
+    await db.delete(poolMembers).where(eq(poolMembers.id, member.id));
+  } else {
+    await db.transaction(async (tx) => {
+      if (member.staked > 0) await adjustPoints(tx, opts.userId, member.staked, 'refund', pool.id);
+      await tx.delete(poolMembers).where(eq(poolMembers.id, member.id));
+    });
+  }
+
+  // If nobody's left, retire the pool so it stops cluttering public discovery.
+  const remaining = (
+    await db.select({ id: poolMembers.id }).from(poolMembers).where(eq(poolMembers.poolId, pool.id))
+  ).length;
+  if (remaining === 0) {
+    await db.delete(pools).where(eq(pools.id, pool.id));
+    return null;
+  }
+  return (await getPool(pool.id))!;
+}
+
 /** Settle a pool on a final score: pay pro-rata to correct-outcome callers. */
 export async function settlePool(poolId: string, result: MatchResult) {
   const pool = await poolRow(poolId);
