@@ -81,9 +81,10 @@ export function FantasyPitch({
   const activePlayer = mode === "build" ? players.find((p) => p.id === active) ?? null : null;
 
   return (
-    <div className={cn("relative w-full overflow-hidden rounded-lg border border-edge bg-coal/50", className)}>
-      <PitchLines />
-
+    <div
+      className={cn("relative w-full overflow-hidden rounded-lg border border-edge bg-coal/50", className)}
+      style={{ perspective: "1200px" }}
+    >
       <div className="absolute right-2.5 top-2.5 z-20 flex items-center gap-1.5">
         {chip && (
           <span className="rounded-chip border border-live/50 bg-live-soft px-1.5 py-1 font-mono text-[8.5px] font-semibold uppercase tracking-[0.12em] text-live">
@@ -95,8 +96,13 @@ export function FantasyPitch({
         </span>
       </div>
 
-      {/* pitch — starting XI */}
-      <div className="relative z-10 flex aspect-[10/12] flex-col justify-between px-[3%] py-[5%]">
+      {/* pitch — starting XI, tilted into 3D (near edge at the foot) */}
+      <div
+        className="relative aspect-[10/12]"
+        style={{ transform: "rotateX(19deg)", transformOrigin: "50% 100%", transformStyle: "preserve-3d" }}
+      >
+        <PitchLines />
+        <div className="relative z-10 flex h-full flex-col justify-between px-[3%] py-[5%]">
         {ROWS.map((pos) => {
           const group = starters.filter((p) => p.position === pos);
           const ph = mode === "build" && !full ? Math.max(0, DEFAULT_XI[pos] - group.length) : 0;
@@ -126,9 +132,10 @@ export function FantasyPitch({
         })}
         {players.length === 0 && (
           <div className="pointer-events-none absolute inset-0 grid place-items-center">
-            <span className="font-mono text-[11px] uppercase tracking-[0.16em] text-faint">tap a slot to build your squad</span>
+            <span className="rounded-default bg-void/80 px-3 py-1.5 font-mono text-[11px] uppercase tracking-[0.16em] text-silver">tap a slot to build your squad</span>
           </div>
         )}
+        </div>
       </div>
 
       {/* bench strip */}
@@ -215,7 +222,7 @@ function Placeholder({ pos, small, onClick }: { pos: FantasyPosition; small?: bo
       >
         <Plus size={small ? 12 : 14} />
       </span>
-      <span className="font-mono text-[8px] uppercase tracking-[0.14em] text-faint sm:text-[9px]">{pos}</span>
+      <span className="rounded-[3px] bg-void/70 px-1 py-px font-mono text-[8px] uppercase tracking-[0.12em] text-silver sm:text-[9px]">{pos}</span>
     </button>
   );
 }
@@ -302,34 +309,50 @@ function Shirt({
       animate={{ opacity: 1, y: 0, scale: 1 }}
       transition={{ duration: 0.3, delay: reduce ? 0 : index * 0.04, ease: [0.16, 1, 0.3, 1] }}
     >
-      {mode === "view" ? <PlayerHoverCard playerId={player.id}>{shirt}</PlayerHoverCard> : shirt}
-      <span className="max-w-full truncate px-0.5 text-center font-mono text-[9px] leading-tight text-silver sm:text-[10px]">
+      <PlayerHoverCard playerId={player.id}>{shirt}</PlayerHoverCard>
+      <span className="max-w-full truncate rounded-[3px] bg-void/85 px-1.5 py-0.5 text-center font-mono text-[10px] font-medium leading-tight text-white shadow-[0_1px_3px_rgba(0,0,0,0.5)] sm:text-[11px]">
         {lastName(player.name)}
       </span>
-      {mode === "build" && <span className="font-mono text-[8.5px] text-faint">{player.price?.toFixed(1)}</span>}
+      {mode === "build" && (
+        <span className="rounded-[3px] bg-void/70 px-1 font-mono text-[8.5px] text-silver">{player.price?.toFixed(1)}</span>
+      )}
     </motion.div>
   );
 }
 
-/* Portrait chalk pitch — our goal at the foot, attacking up. */
+/* Portrait grass pitch — our goal at the foot, attacking up. */
 function PitchLines() {
-  const stroke = "var(--color-edge-2)";
+  const line = "rgba(255,255,255,0.74)";
   return (
-    <div className="absolute inset-0">
-      <div className="grid-lines absolute inset-0 opacity-30" aria-hidden />
-      <svg viewBox="0 0 100 120" preserveAspectRatio="none" className="absolute inset-0 h-full w-full" aria-hidden fill="none" stroke={stroke} strokeWidth={0.4}>
+    <div className="absolute inset-0 overflow-hidden">
+      {/* grass + mowing stripes (bands run across the pitch) */}
+      <div
+        className="absolute inset-0"
+        style={{ background: "repeating-linear-gradient(180deg, #2f7d3f 0 8.33%, #276e35 8.33% 16.66%)" }}
+      />
+      {/* top light for a bit of turf sheen */}
+      <div
+        className="absolute inset-0"
+        style={{ background: "linear-gradient(180deg, rgba(255,255,255,0.07), transparent 42%)" }}
+      />
+      {/* white markings */}
+      <svg viewBox="0 0 100 120" preserveAspectRatio="none" className="absolute inset-0 h-full w-full" aria-hidden fill="none" stroke={line} strokeWidth={0.5}>
         <rect x="2.5" y="2.5" width="95" height="115" rx="1.5" />
         <line x1="2.5" y1="60" x2="97.5" y2="60" />
         <circle cx="50" cy="60" r="11" />
-        <circle cx="50" cy="60" r="0.7" fill={stroke} stroke="none" />
+        <circle cx="50" cy="60" r="0.7" fill={line} stroke="none" />
         <rect x="26" y="2.5" width="48" height="16" />
         <rect x="39" y="2.5" width="22" height="6" />
         <rect x="26" y="101.5" width="48" height="16" />
         <rect x="39" y="111.5" width="22" height="6" />
       </svg>
+      {/* far-end shadow (blends the 3D recede into the surround) + edge vignette */}
       <div
         className="absolute inset-0"
-        style={{ background: "radial-gradient(100% 80% at 50% 45%, transparent 60%, color-mix(in srgb, var(--color-void) 80%, transparent) 100%)" }}
+        style={{
+          background:
+            "linear-gradient(180deg, rgba(3,10,5,0.6) 0%, transparent 24%, transparent 84%, rgba(3,10,5,0.32) 100%), radial-gradient(120% 92% at 50% 42%, transparent 60%, rgba(3,10,5,0.5) 100%)",
+        }}
       />
     </div>
   );

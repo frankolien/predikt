@@ -30,8 +30,31 @@ const toBaseUnit = (human: number, currency: string) =>
 const toDisplay = (base: number, currency: string) =>
   currency === 'usdt' ? base / USDT_UNIT : base;
 
+/** Teams still in the tournament — those with a non-finished (scheduled/live)
+ *  fixture. Eliminated nations appear only in finished fixtures, so they drop out. */
+function activeTeamCodes(): Set<string> | null {
+  try {
+    const fixtures = manager.allFixtures() as Array<{ matchStatus?: string; home?: { code?: string }; away?: { code?: string } }>;
+    const active = new Set<string>();
+    for (const f of fixtures) {
+      if (f.matchStatus === 'finished') continue;
+      if (f.home?.code) active.add(f.home.code.toUpperCase());
+      if (f.away?.code) active.add(f.away.code.toUpperCase());
+    }
+    return active.size > 0 ? active : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The selectable pool — only players from teams still alive in the tournament.
+ *  Falls back to the full pool if the feed is unavailable or the filter would
+ *  leave too few players (e.g. a team-code mismatch), so it never breaks. */
 export function listPlayers(): Player[] {
-  return getPool();
+  const active = activeTeamCodes();
+  if (!active) return getPool();
+  const filtered = getPool().filter((p) => active.has(p.teamCode.toUpperCase()));
+  return filtered.length >= 30 ? filtered : getPool();
 }
 
 function liveFixtures(): ScoreFixture[] {
@@ -194,7 +217,7 @@ export function validateEntry(e: EntryInput): {
 export function autoDraft(): { squadIds: string[]; starterIds: string[]; captainId: string; viceId: string } {
   const need = { ...SQUAD_QUOTA };
   const byPos: Record<Position, Player[]> = { GK: [], DEF: [], MID: [], FWD: [] };
-  for (const p of getPool()) byPos[p.position].push(p);
+  for (const p of listPlayers()) byPos[p.position].push(p);
   for (const pos of Object.keys(byPos) as Position[]) byPos[pos].sort((a, b) => a.price - b.price);
 
   const used = new Set<string>();
