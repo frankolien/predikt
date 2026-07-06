@@ -10,6 +10,7 @@ import { LiveSimControls } from "../components/LiveSimControls";
 import { GafferPanel } from "../components/GafferPanel";
 import { PoolHub } from "../components/PoolHub";
 import { MyPoolCard } from "../components/MyPoolCard";
+import { MyRooms } from "../components/MyRooms";
 import { PoolStandings } from "../components/PoolStandings";
 import { Leaderboard } from "../components/Leaderboard";
 import { Onboard } from "../components/Onboard";
@@ -189,6 +190,14 @@ export default function Room() {
                 </p>
               </Card>
             ))}
+          {account && (
+            <MyRooms
+              fixtures={fixtures}
+              currentFixtureId={fixtureId}
+              refreshKey={lbKey}
+              onOpen={(fid) => navigate(`/room/${fid}`)}
+            />
+          )}
           {showAi && fixtureId && <VoiceAsk fixtureId={fixtureId} status={voiceStatus} />}
         </div>
       </div>
