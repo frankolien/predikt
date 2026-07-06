@@ -45,6 +45,15 @@ ENV NODE_ENV=production \
     GAFFER_MODE=local \
     GAFFER_SERVE_WEB=1
 
+# Shared libs the QVAC on-device engine's native binaries need at runtime.
+# The prebuilt llama.cpp ggml backends (@qvac/llm-llamacpp) dlopen libvulkan
+# (GPU backend — harmless no-op on a CPU-only box, but the .so must resolve) and
+# link libgomp; ca-certificates lets the model registry fetch over TLS. Without
+# these the Bare worker fails to start → "RPC initialization timed out".
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ca-certificates libvulkan1 libgomp1 \
+ && rm -rf /var/lib/apt/lists/*
+
 # anvil (+ cast for the readiness probe) for the bundled local chain
 COPY --from=foundry /usr/local/bin/anvil /usr/local/bin/anvil
 COPY --from=foundry /usr/local/bin/cast  /usr/local/bin/cast
