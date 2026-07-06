@@ -257,6 +257,53 @@ export function autoDraft(): { squadIds: string[]; starterIds: string[]; captain
     }
   }
 
+  // Safety net — the greedy reserve can still overshoot on a thin pool (few cheap
+  // options at a position). Downgrade picks to cheaper unused same-position players
+  // (respecting max-per-nation) until the squad fits, each step shedding the least
+  // value that clears the overspend so the marquee attack survives.
+  {
+    let total10 = chosen.reduce((a, p) => a + P10(p.price), 0);
+    const inSquad = new Set(chosen.map((p) => p.id));
+    const teamCt: Record<string, number> = {};
+    for (const p of chosen) teamCt[p.teamCode] = (teamCt[p.teamCode] || 0) + 1;
+    let guard = 0;
+    while (total10 > BUDGET * 10 && guard++ < SQUAD_SIZE * 20) {
+      const over10 = total10 - BUDGET * 10;
+      let cover: { i: number; alt: Player; save10: number } | null = null; // clears `over`, least value lost
+      let most: { i: number; alt: Player; save10: number } | null = null; //  biggest saving (progress fallback)
+      for (let i = 0; i < chosen.length; i++) {
+        const cur = chosen[i];
+        const maxAlt10 = P10(cur.price) - over10; // an alt at/below this fully clears the overspend
+        let cheapest: Player | null = null;
+        let bestCover: Player | null = null;
+        for (const alt of byPos[cur.position]) { // price-ascending
+          if (P10(alt.price) >= P10(cur.price)) break; // nothing cheaper past here
+          if (inSquad.has(alt.id)) continue;
+          if (alt.teamCode !== cur.teamCode && (teamCt[alt.teamCode] || 0) >= MAX_PER_TEAM) continue;
+          if (!cheapest) cheapest = alt;
+          if (P10(alt.price) <= maxAlt10) bestCover = alt; // highest-priced alt that still clears `over`
+        }
+        if (cheapest) {
+          const save10 = P10(cur.price) - P10(cheapest.price);
+          if (!most || save10 > most.save10) most = { i, alt: cheapest, save10 };
+        }
+        if (bestCover) {
+          const save10 = P10(cur.price) - P10(bestCover.price);
+          if (!cover || save10 < cover.save10) cover = { i, alt: bestCover, save10 };
+        }
+      }
+      const swap = cover ?? most;
+      if (!swap) break; // nothing left to downgrade
+      const cur = chosen[swap.i];
+      inSquad.delete(cur.id);
+      teamCt[cur.teamCode]--;
+      chosen[swap.i] = swap.alt;
+      inSquad.add(swap.alt.id);
+      teamCt[swap.alt.teamCode] = (teamCt[swap.alt.teamCode] || 0) + 1;
+      total10 -= swap.save10;
+    }
+  }
+
   // Starting XI: the best-value legal team — priciest GK, then the 10 priciest
   // outfield within formation bounds (so all your marquee forwards start).
   const bp: Record<Position, Player[]> = { GK: [], DEF: [], MID: [], FWD: [] };

@@ -13,6 +13,8 @@ import {
   Coins,
   Plus,
   Loader2,
+  Copy,
+  Check,
 } from "lucide-react";
 import { Card, Eyebrow, Pill, LiveDot, Reveal, Button } from "../components/ui";
 import { Onboard } from "../components/Onboard";
@@ -28,6 +30,19 @@ function MoneySpine() {
   const { wallet, connectWallet, account } = useApp();
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  const copyAddress = (address: string) => {
+    navigator.clipboard
+      ?.writeText(address)
+      .then(() => {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1400);
+      })
+      .catch(() => {
+        /* clipboard blocked */
+      });
+  };
 
   const create = async () => {
     setBusy(true);
@@ -61,13 +76,22 @@ function MoneySpine() {
               <span className="font-mono text-[12px] text-steel">USD₮</span>
             </div>
           </div>
-          <div className="flex items-center gap-2 rounded-default border border-edge bg-panel-2/60 px-3 py-2">
+          <button
+            onClick={() => copyAddress(wallet.address)}
+            title={copied ? "Address copied" : `Copy address · ${wallet.address}`}
+            className="group flex w-full items-center gap-2 rounded-default border border-edge bg-panel-2/60 px-3 py-2 text-left transition-colors hover:border-edge-2"
+          >
             <ShieldCheck size={13} className="shrink-0 text-live" />
             <span className="font-mono text-[11px] text-silver">{shortAddr(wallet.address)}</span>
+            {copied ? (
+              <Check size={12} className="text-live" />
+            ) : (
+              <Copy size={12} className="text-steel transition-colors group-hover:text-chalk" />
+            )}
             <span className="ml-auto font-mono text-[9.5px] uppercase tracking-[0.14em] text-faint">
               {wallet.backend}
             </span>
-          </div>
+          </button>
         </div>
       ) : (
         <div className="flex flex-col gap-3">

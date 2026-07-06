@@ -4,6 +4,7 @@ import { api, getToken, setToken, type Account, type Health, type Wallet, type W
 import { AppContext } from "./context";
 import { useTheme } from "./lib/theme";
 import { Nav } from "./components/Nav";
+import { ToastProvider } from "./components/Toast";
 
 export function AppShell() {
   const [health, setHealth] = useState<Health | null>(null);
@@ -138,8 +139,10 @@ export function AppShell() {
     <AppContext.Provider
       value={{ health, account, commitAuth, restoreAccount, signIn, signOut, refreshAccount, wallet, setWallet, refreshBalance, connectWallet }}
     >
-      <Nav ai={health?.ai} account={account} theme={theme} onToggleTheme={toggle} />
-      <Outlet />
+      <ToastProvider>
+        <Nav ai={health?.ai} account={account} wallet={wallet} theme={theme} onToggleTheme={toggle} />
+        <Outlet />
+      </ToastProvider>
     </AppContext.Provider>
   );
 }

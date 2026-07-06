@@ -51,3 +51,4 @@ yarn-error.log*
 # claude code — local machine settings (permission paths are machine-specific)
 .claude/
 CLAUDE.local.md
+.vercel

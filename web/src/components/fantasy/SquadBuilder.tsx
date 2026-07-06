@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Sparkles, Trash2, Cpu, Loader2 } from "lucide-react";
 import { Flag, Eyebrow, LiveDot } from "../ui";
 import { FantasyPitch, type PitchPlayer } from "./FantasyPitch";
 import { PlayerHoverCard } from "./PlayerHoverCard";
 import { SpeakButton } from "../SpeakButton";
+import { useToast } from "../Toast";
 import { api, streamFantasyAI, aiLive, type FantasyPlayer, type FantasyPosition, type FantasyChip } from "../../lib/api";
 import { useApp } from "../../context";
 
@@ -95,6 +96,16 @@ export function SquadBuilder({ onChange }: { onChange: (s: SquadState) => void }
   useEffect(() => {
     onChange({ squadIds: sel, starterIds: [...starterSet], captainId: captain, viceId: vice, chip, valid });
   }, [sel, starterSet, captain, vice, chip, valid]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Snackbar the moment the squad tips over the credit cap — any path (manual
+  // add, auto-draft, sub). Fires only on the ≤cap → >cap crossing, not every render.
+  const notify = useToast();
+  const wasOverBudget = useRef(budget > BUDGET + 1e-6);
+  useEffect(() => {
+    const over = budget > BUDGET + 1e-6;
+    if (over && !wasOverBudget.current) notify(`Over the ${BUDGET}-credit budget cap — drop a player to fit.`);
+    wasOverBudget.current = over;
+  }, [budget, notify]);
 
   const addPlayer = (p: FantasyPlayer) => {
     if (sel.includes(p.id)) return;

@@ -83,7 +83,6 @@ export function FantasyPitch({
   return (
     <div
       className={cn("relative w-full overflow-hidden rounded-lg border border-edge bg-coal/50", className)}
-      style={{ perspective: "1200px" }}
     >
       <div className="absolute right-2.5 top-2.5 z-20 flex items-center gap-1.5">
         {chip && (
@@ -96,12 +95,24 @@ export function FantasyPitch({
         </span>
       </div>
 
-      {/* pitch — starting XI, tilted into 3D (near edge at the foot) */}
-      <div
-        className="relative aspect-[10/12]"
-        style={{ transform: "rotateX(19deg)", transformOrigin: "50% 100%", transformStyle: "preserve-3d" }}
-      >
-        <PitchLines />
+      {/* pitch — a 3D grass field with the starting XI laid FLAT on top, so the
+         perspective sells depth while player names stay perfectly upright. */}
+      <div className="relative aspect-[10/12] overflow-hidden bg-[#276e35]">
+        {/* grass, tilted back for depth (near edge at the foot) */}
+        <div
+          className="absolute inset-0"
+          style={{ transform: "perspective(1600px) rotateX(15deg)", transformOrigin: "50% 100%" }}
+        >
+          <PitchLines />
+        </div>
+        {/* flat depth wash — darkens the far end + hides the tilt seam at the top */}
+        <div
+          className="pointer-events-none absolute inset-0"
+          style={{
+            background:
+              "linear-gradient(180deg, rgba(3,10,5,0.5) 0%, transparent 20%, transparent 88%, rgba(3,10,5,0.28) 100%), radial-gradient(125% 90% at 50% 38%, transparent 60%, rgba(3,10,5,0.42) 100%)",
+          }}
+        />
         <div className="relative z-10 flex h-full flex-col justify-between px-[3%] py-[5%]">
         {ROWS.map((pos) => {
           const group = starters.filter((p) => p.position === pos);
@@ -256,20 +267,25 @@ function Shirt({
 }) {
   const score = player.points ?? 0;
   const sz = bench ? "h-9 w-9 sm:h-11 sm:w-11" : "h-11 w-11 sm:h-14 sm:w-14";
-  const flagSz = bench ? 22 : 26;
+  const flagSz = bench ? 36 : 56;
   const shirt = (
     <button
       onClick={onToggle}
       className={cn(
-        "relative grid place-items-center rounded-full border bg-panel transition-all",
+        "relative grid place-items-center rounded-full transition-transform",
         sz,
-        captain ? "border-live/60 ring-1 ring-live/40" : vice ? "border-edge-3" : "border-edge-2",
-        active ? "-translate-y-0.5 border-chalk ring-2 ring-chalk/60" : "hover:border-edge-3",
+        captain && "ring-2 ring-live",
+        !captain && vice && "ring-2 ring-white/70",
+        active && "-translate-y-0.5 ring-2 ring-white",
         dim && "opacity-45",
       )}
       aria-label={player.name}
     >
-      <Flag code={player.teamCode} size={flagSz} className={bench ? "" : "sm:!h-8 sm:!w-8"} />
+      <Flag
+        code={player.teamCode}
+        size={flagSz}
+        className="!h-full !w-full object-cover shadow-[0_2px_6px_rgba(0,0,0,0.45),0_0_0_1px_rgba(0,0,0,0.28)]"
+      />
       {captain && (
         <span className="absolute -left-1 -top-1 grid h-4 w-4 place-items-center rounded-full border border-live bg-void font-mono text-[8px] font-bold text-live">
           C
@@ -310,11 +326,11 @@ function Shirt({
       transition={{ duration: 0.3, delay: reduce ? 0 : index * 0.04, ease: [0.16, 1, 0.3, 1] }}
     >
       <PlayerHoverCard playerId={player.id}>{shirt}</PlayerHoverCard>
-      <span className="max-w-full truncate rounded-[3px] bg-void/85 px-1.5 py-0.5 text-center font-mono text-[10px] font-medium leading-tight text-white shadow-[0_1px_3px_rgba(0,0,0,0.5)] sm:text-[11px]">
+      <span className="max-w-full truncate rounded-[4px] bg-void/90 px-1.5 py-0.5 text-center font-mono text-[11px] font-semibold leading-tight text-white shadow-[0_1px_4px_rgba(0,0,0,0.6)] sm:text-[12px]">
         {lastName(player.name)}
       </span>
       {mode === "build" && (
-        <span className="rounded-[3px] bg-void/70 px-1 font-mono text-[8.5px] text-silver">{player.price?.toFixed(1)}</span>
+        <span className="rounded-[4px] bg-void/80 px-1.5 font-mono text-[9.5px] font-medium text-white">{player.price?.toFixed(1)}</span>
       )}
     </motion.div>
   );
@@ -346,14 +362,6 @@ function PitchLines() {
         <rect x="26" y="101.5" width="48" height="16" />
         <rect x="39" y="111.5" width="22" height="6" />
       </svg>
-      {/* far-end shadow (blends the 3D recede into the surround) + edge vignette */}
-      <div
-        className="absolute inset-0"
-        style={{
-          background:
-            "linear-gradient(180deg, rgba(3,10,5,0.6) 0%, transparent 24%, transparent 84%, rgba(3,10,5,0.32) 100%), radial-gradient(120% 92% at 50% 42%, transparent 60%, rgba(3,10,5,0.5) 100%)",
-        }}
-      />
     </div>
   );
 }

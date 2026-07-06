@@ -1,8 +1,9 @@
+import { useState } from "react";
 import { Link, NavLink } from "react-router-dom";
-import { Cpu, Coins, User, Sun, Moon } from "lucide-react";
-import type { AiStatus, Account } from "../lib/api";
+import { Cpu, Coins, User, Sun, Moon, Wallet as WalletIcon, Copy, Check } from "lucide-react";
+import type { AiStatus, Account, Wallet } from "../lib/api";
 import type { Theme } from "../lib/theme";
-import { usdt } from "../lib/format";
+import { usdt, shortAddr } from "../lib/format";
 import { cn } from "../lib/cn";
 import { Pill, LiveDot, Avatar } from "./ui";
 
@@ -47,14 +48,50 @@ function label(model: string) {
   return model.replace(/_/g, " ").replace(/ INST.*$/i, "").trim().slice(0, 14);
 }
 
+/** Your self-custodial USD₮ balance + a click-to-copy address. */
+function WalletChip({ wallet }: { wallet: Wallet }) {
+  const [copied, setCopied] = useState(false);
+  const copy = () => {
+    navigator.clipboard
+      ?.writeText(wallet.address)
+      .then(() => {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1400);
+      })
+      .catch(() => {
+        /* clipboard blocked — address is in the title tooltip */
+      });
+  };
+  return (
+    <button
+      onClick={copy}
+      title={copied ? "Address copied" : `Copy wallet address · ${wallet.address}`}
+      className="group flex items-center gap-1.5 rounded-chip border border-edge-2 px-2 py-1 font-mono text-[11px] transition-colors hover:border-edge-3"
+    >
+      <WalletIcon size={11} className="text-live" />
+      <span className="text-chalk">{usdt(wallet.usdtHuman)}</span>
+      <span className="text-steel">USD₮</span>
+      <span className="hidden text-faint sm:inline">·</span>
+      <span className="hidden text-steel sm:inline">{shortAddr(wallet.address)}</span>
+      {copied ? (
+        <Check size={11} className="text-live" />
+      ) : (
+        <Copy size={11} className="text-steel transition-colors group-hover:text-chalk" />
+      )}
+    </button>
+  );
+}
+
 export function Nav({
   ai,
   account,
+  wallet,
   theme,
   onToggleTheme,
 }: {
   ai?: AiStatus;
   account?: Account | null;
+  wallet?: Wallet | null;
   theme?: Theme;
   onToggleTheme?: () => void;
 }) {
@@ -73,12 +110,13 @@ export function Nav({
         </div>
         <div className="flex items-center gap-2.5">
           <AiPill ai={ai} />
+          {wallet && <WalletChip wallet={wallet} />}
           {account ? (
             <div className="flex items-center gap-2 rounded-chip border border-edge-2 py-1 pl-1 pr-2.5">
               <Avatar seed={account.handle} size={20} />
-              <span className="font-mono text-[11px] text-chalk">{account.handle}</span>
+              <span className="hidden font-mono text-[11px] text-chalk sm:inline">{account.handle}</span>
               <span className="flex items-center gap-1 font-mono text-[11px] text-live">
-                <Coins size={10} /> {usdt(account.points, 0)}
+                <Coins size={10} /> {usdt(account.points, 0)} <span className="text-faint">pts</span>
               </span>
             </div>
           ) : (
