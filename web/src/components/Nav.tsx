@@ -1,17 +1,17 @@
 import { useState } from "react";
 import { Link, NavLink } from "react-router-dom";
-import { Cpu, Coins, User, Sun, Moon, Wallet as WalletIcon, Copy, Check } from "lucide-react";
+import { Cpu, Coins, User, Sun, Moon, Wallet as WalletIcon, Copy, Check, LayoutGrid, Radio, Trophy, Users, type LucideIcon } from "lucide-react";
 import type { AiStatus, Account, Wallet } from "../lib/api";
 import type { Theme } from "../lib/theme";
 import { usdt, shortAddr } from "../lib/format";
 import { cn } from "../lib/cn";
 import { Pill, LiveDot, Avatar } from "./ui";
 
-const LINKS = [
-  { to: "/app", label: "Hub" },
-  { to: "/predict", label: "Predict" },
-  { to: "/organize", label: "Organize" },
-  { to: "/fantasy", label: "Fantasy" },
+const LINKS: { to: string; label: string; icon: LucideIcon }[] = [
+  { to: "/app", label: "Hub", icon: LayoutGrid },
+  { to: "/predict", label: "Predict", icon: Radio },
+  { to: "/organize", label: "Organize", icon: Trophy },
+  { to: "/fantasy", label: "Fantasy", icon: Users },
 ];
 
 function NavItem({ to, label }: { to: string; label: string }) {
@@ -27,6 +27,34 @@ function NavItem({ to, label }: { to: string; label: string }) {
     >
       {label}
     </NavLink>
+  );
+}
+
+/** Primary navigation on mobile — the top-bar links are md-only, so phones get a
+   thumb-reachable bottom tab bar (sports-app convention). */
+function MobileTabBar() {
+  return (
+    <nav className="fixed inset-x-0 bottom-0 z-50 grid grid-cols-4 border-t border-edge bg-void/90 pb-[env(safe-area-inset-bottom)] backdrop-blur-md md:hidden">
+      {LINKS.map(({ to, label, icon: Icon }) => (
+        <NavLink
+          key={to}
+          to={to}
+          className={({ isActive }) =>
+            cn(
+              "flex flex-col items-center gap-1 py-2 font-mono text-[9px] uppercase tracking-[0.14em] transition-colors",
+              isActive ? "text-chalk" : "text-steel",
+            )
+          }
+        >
+          {({ isActive }) => (
+            <>
+              <Icon size={19} className={cn("transition-colors", isActive && "text-live")} />
+              {label}
+            </>
+          )}
+        </NavLink>
+      ))}
+    </nav>
   );
 }
 
@@ -96,6 +124,7 @@ export function Nav({
   onToggleTheme?: () => void;
 }) {
   return (
+    <>
     <header className="fixed inset-x-0 top-0 z-50 border-b border-edge bg-void/80 backdrop-blur-md">
       <div className="mx-auto flex h-14 max-w-[1180px] items-center justify-between px-6">
         <div className="flex items-center gap-5">
@@ -136,5 +165,7 @@ export function Nav({
         </div>
       </div>
     </header>
+    <MobileTabBar />
+    </>
   );
 }

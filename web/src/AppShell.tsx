@@ -141,7 +141,10 @@ export function AppShell() {
     >
       <ToastProvider>
         <Nav ai={health?.ai} account={account} wallet={wallet} theme={theme} onToggleTheme={toggle} />
-        <Outlet />
+        {/* pb clears the mobile bottom tab bar; none needed at md+ */}
+        <div className="pb-16 md:pb-0">
+          <Outlet />
+        </div>
       </ToastProvider>
     </AppContext.Provider>
   );
