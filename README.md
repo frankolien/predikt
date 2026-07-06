@@ -52,6 +52,20 @@ wallets (WDK). No cloud, no API keys, no real funds.
 
 Neither is a logo skin. This is the judging criterion "real use of your track" taken literally.
 
+## Try it — two ways
+
+**Hosted (instant, in your browser):**
+**https://glistening-reverence-production-c01a.up.railway.app**
+The full product on a bundled demo chain — self-custodial USD₮ wallets, prediction pools, fantasy
+leagues, knockout cups, and **real, live** World Cup 2026 matches. The Gaffer here runs the
+**scripted** pundit on purpose: QVAC is on-device by design — its Bare + llama.cpp runtime targets
+the user's own machine, not a shared cloud container — so the hosted link showcases everything
+*except* live inference.
+
+**On-device (the real QVAC):** run it locally (below) and the Gaffer's analysis, scoreline and
+hot-take become **real Llama 3.2 1B inference on your machine**, streamed token-by-token, nothing
+leaving the device. That's the track taken literally: *your keys, your model, your call.*
+
 ## Quick start
 
 **Prerequisites**

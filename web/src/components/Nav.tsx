@@ -39,7 +39,7 @@ function AiPill({ ai }: { ai?: AiStatus }) {
     );
   if (ai.state === "loading")
     return <Pill><Cpu size={11} /> Model {Math.round(ai.progress * 100)}%</Pill>;
-  if (ai.state === "mock") return <Pill><Cpu size={11} /> Pundit · scripted</Pill>;
+  if (ai.state === "mock") return null; // scripted fallback → hide AI chrome; the product leads with WDK
   return <Pill><Cpu size={11} /> AI · {ai.state}</Pill>;
 }
 

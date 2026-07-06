@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { motion, useReducedMotion } from "motion/react";
 import { Link } from "react-router-dom";
-import { ArrowRight, Brain, Wallet, Radio, Users, Trophy, Star } from "lucide-react";
+import { ArrowRight, Wallet, Radio, Users, Trophy, Star } from "lucide-react";
 import { Brackets, LiveDot } from "./ui";
 import { cn } from "../lib/cn";
 import type { Health } from "../lib/api";
@@ -10,21 +10,21 @@ import type { Health } from "../lib/api";
    TacticsBoard — the gamified, interactive landing centrepiece.
 
    The whole platform laid out as a starting line-up on a chalk tactics board:
-   the Gaffer (on-device AI) plays regista, the self-custodial USD₮ wallet keeps
-   goal, and the three ways to play — Predict / Organize / Fantasy — are the
-   front three, fed by the ball (the live World Cup feed). Hover or tap a player
-   to see what it does and where it takes you. Monochrome chalkboard; the only
-   colour is the live-green that signals real, running systems (honest health).
+   the self-custodial USD₮ wallet plays regista — the playmaker that feeds money
+   to the three ways to play (Predict / Organize / Fantasy, the front three) —
+   all off the ball (the live World Cup feed). Hover or tap a player to see what
+   it does and where it takes you. Monochrome chalkboard; the only colour is the
+   live-green that signals real, running systems (honest health).
    ============================================================================ */
 
-type SystemKey = "ai" | "chain" | "feed";
+type SystemKey = "chain" | "feed";
 
 type Node = {
   key: string;
   no: string;
   label: string;
   role: string;
-  icon: typeof Brain;
+  icon: typeof Wallet;
   detail: string;
   chips: string[];
   x: number; // % across the board (0 left → 100 right)
@@ -36,30 +36,15 @@ type Node = {
 
 const NODES: Node[] = [
   {
-    key: "gaffer",
-    no: "10",
-    label: "the Gaffer",
-    role: "Regista · on-device AI",
-    icon: Brain,
-    detail:
-      "Your private pundit. Reads every tie — form, matchups, a proper hot take — and reacts live as the goals go in. Runs on your device. No cloud, ever.",
-    chips: ["reads the tie", "reacts live", "no cloud"],
-    x: 63,
-    y: 50,
-    live: "ai",
-    to: "/app",
-    cta: "Meet the Gaffer",
-  },
-  {
     key: "wallet",
-    no: "1",
+    no: "10",
     label: "USD₮ wallet",
-    role: "Keeper · self-custodial",
+    role: "Regista · self-custodial",
     icon: Wallet,
     detail:
-      "One self-custodial USD₮ wallet under everything. Buy-ins go to escrow; payouts settle on-chain to you, with a real tx hash. Or keep it free and play in points.",
+      "One self-custodial USD₮ wallet is the playmaker under everything. Buy-ins go to escrow; payouts settle on-chain to you, with a real tx hash. Or keep it free and play in points.",
     chips: ["self-custodial", "on-chain payouts", "points too"],
-    x: 89,
+    x: 68,
     y: 50,
     live: "chain",
     to: "/app",
@@ -83,7 +68,7 @@ const NODES: Node[] = [
     key: "organize",
     no: "9",
     label: "Organize",
-    role: "Front · the gaffer",
+    role: "Front · the cup",
     icon: Trophy,
     detail:
       "Run a knockout cup in minutes. Share a CUP-code, seed the bracket, report scores — winners auto-advance and the pot auto-settles by your prize split.",
@@ -100,7 +85,7 @@ const NODES: Node[] = [
     role: "Front · the manager",
     icon: Users,
     detail:
-      "Build a salary-cap XI from real World Cup squads, name a captain, and climb mini-leagues scored live off the fixture feed. The Gaffer can auto-draft you.",
+      "Build a salary-cap XI from real World Cup squads, name a captain, and climb mini-leagues scored live off the fixture feed. Auto-draft a full squad in one tap.",
     chips: ["real WC players", "salary cap", "live scoring"],
     x: 33,
     y: 79,
@@ -124,10 +109,9 @@ const NODES: Node[] = [
 
 const BALL = NODES.find((n) => n.key === "feed")!;
 const PASSES: Array<[string, string]> = [
-  ["wallet", "gaffer"],
-  ["gaffer", "predict"],
-  ["gaffer", "organize"],
-  ["gaffer", "fantasy"],
+  ["wallet", "predict"],
+  ["wallet", "organize"],
+  ["wallet", "fantasy"],
 ];
 
 const byKey = Object.fromEntries(NODES.map((n) => [n.key, n]));
@@ -139,7 +123,6 @@ const vy = (n: Node) => (n.y / 100) * VB_H;
 
 function systemOk(health: Health | null, k?: SystemKey): boolean {
   if (!health) return false;
-  if (k === "ai") return health.ai?.state === "ready" || health.ai?.state === "mock";
   if (k === "chain") return !!health.chainReady;
   if (k === "feed") return !!health.ok;
   return false;
@@ -153,8 +136,7 @@ export function TacticsBoard({ health }: { health: Health | null }) {
   const active = activeKey ? byKey[activeKey] : null;
 
   const systems: Array<{ k: SystemKey; label: string }> = [
-    { k: "ai", label: "AI" },
-    { k: "chain", label: "chain" },
+    { k: "chain", label: "wallet" },
     { k: "feed", label: "feed" },
   ];
 
@@ -350,12 +332,7 @@ function BallGlyph({ active, live, reduce }: { active: boolean; live: boolean; r
 }
 
 function InfoPanel({ active, health }: { active: Node | null; health: Health | null }) {
-  const aiLabel =
-    health?.ai?.state === "ready"
-      ? "on-device · ready"
-      : health?.ai?.state === "loading"
-        ? `warming up · ${Math.round((health.ai.progress ?? 0) * 100)}%`
-        : health?.ai?.state ?? "—";
+  const walletLabel = health?.chainReady ? "self-custodial · ready" : "connecting…";
 
   return (
     <div className="mt-2.5 flex min-h-[104px] flex-col justify-center overflow-hidden rounded-default border border-edge bg-void/40 p-3.5 sm:mt-3.5 sm:h-[150px] sm:min-h-0">
@@ -398,12 +375,12 @@ function InfoPanel({ active, health }: { active: Node | null; health: Health | n
           <div>
             <div className="font-display text-[15px] font-semibold text-chalk">The starting line-up</div>
             <p className="mt-0.5 text-[12.5px] text-steel">
-              One wallet, one Gaffer, three ways to play.{" "}
+              One wallet, three ways to play.{" "}
               <span className="text-silver">Hover the squad</span> to scout each one.
             </p>
           </div>
           <span className="whitespace-nowrap font-mono text-[10px] uppercase tracking-[0.14em] text-faint">
-            AI · {aiLabel}
+            USD₮ · {walletLabel}
           </span>
         </div>
       )}

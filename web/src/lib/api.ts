@@ -1,4 +1,13 @@
-/** Typed client for the Gaffer localhost API (proxied via Vite at /api). */
+/** Typed client for the Gaffer API. */
+
+/**
+ * Backend base URL. Empty = same-origin — the default for local dev (Vite proxy)
+ * and the single-service server that serves the SPA + API together. Set
+ * `VITE_API_BASE` at build time to an absolute URL when the frontend is hosted
+ * separately from the backend (e.g. a Vercel frontend calling the Railway API).
+ * The backend allows cross-origin fetch + EventSource, so no proxy is needed.
+ */
+export const API_BASE = ((import.meta.env.VITE_API_BASE as string | undefined) ?? "").replace(/\/+$/, "");
 
 export interface TeamCard {
   id: string;
@@ -70,6 +79,14 @@ export interface AiStatus {
   detail: string;
   onDevice: boolean;
 }
+
+/**
+ * True when the on-device model is genuinely running (ready, or warming up) —
+ * false for the scripted fallback. Gates the AI-forward UI so a scripted backend
+ * (e.g. the hosted deploy) leads with the WDK money layer instead of advertising
+ * a "scripted" pundit. On-device (local / ngrok) shows the full AI experience.
+ */
+export const aiLive = (ai?: AiStatus): boolean => !!ai?.onDevice;
 
 export interface Health {
   ok: boolean;
@@ -305,13 +322,13 @@ function authHeaders(): Record<string, string> {
 }
 
 async function get<T>(path: string): Promise<T> {
-  const r = await fetch(`/api${path}`, { headers: { ...authHeaders() } });
+  const r = await fetch(`${API_BASE}/api${path}`, { headers: { ...authHeaders() } });
   if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `GET ${path} ${r.status}`);
   return r.json() as Promise<T>;
 }
 
 async function post<T>(path: string, body?: unknown): Promise<T> {
-  const r = await fetch(`/api${path}`, {
+  const r = await fetch(`${API_BASE}/api${path}`, {
     method: "POST",
     // Only declare a JSON content-type when we actually send a body — otherwise
     // Fastify rejects the empty body (FST_ERR_CTP_EMPTY_JSON_BODY).
@@ -323,7 +340,7 @@ async function post<T>(path: string, body?: unknown): Promise<T> {
 }
 
 async function del<T>(path: string): Promise<T> {
-  const r = await fetch(`/api${path}`, { method: "DELETE" });
+  const r = await fetch(`${API_BASE}/api${path}`, { method: "DELETE" });
   if (!r.ok) throw new Error(`DELETE ${path} ${r.status}`);
   return r.json() as Promise<T>;
 }
@@ -441,7 +458,7 @@ export function streamDirector(
 ): () => void {
   const qs = new URLSearchParams({ kind });
   if (matchId) qs.set("matchId", matchId);
-  const es = new EventSource(`/api/organize/${tournamentId}/ai?${qs.toString()}`);
+  const es = new EventSource(`${API_BASE}/api/organize/${tournamentId}/ai?${qs.toString()}`);
   es.onmessage = (msg) => {
     try {
       onEvent(JSON.parse(msg.data) as DirectorEvent);
@@ -462,7 +479,7 @@ export function streamFantasyAI(
   onEvent: (e: DirectorEvent) => void,
 ): () => void {
   const qs = new URLSearchParams({ players: playerIds.join(","), captain: captainId, kind });
-  const es = new EventSource(`/api/fantasy/ai?${qs.toString()}`);
+  const es = new EventSource(`${API_BASE}/api/fantasy/ai?${qs.toString()}`);
   es.onmessage = (msg) => {
     try {
       onEvent(JSON.parse(msg.data) as DirectorEvent);
@@ -481,7 +498,7 @@ export function streamFantasyAI(
  * cleanup fn. EventSource auto-reconnects, so we don't close on error.
  */
 export function streamFixtures(onFixtures: (fixtures: FixtureSummary[]) => void): () => void {
-  const es = new EventSource("/api/stream");
+  const es = new EventSource(`${API_BASE}/api/stream`);
   es.onmessage = (msg) => {
     try {
       const data = JSON.parse(msg.data) as { type: string; fixtures?: FixtureSummary[] };
@@ -501,7 +518,7 @@ export type LiveEvent =
 
 /** SSE stream of the on-device in-play reaction. Returns a cleanup fn. */
 export function streamLiveCommentary(fixtureId: string, onEvent: (e: LiveEvent) => void): () => void {
-  const es = new EventSource(`/api/live/${fixtureId}/commentary`);
+  const es = new EventSource(`${API_BASE}/api/live/${fixtureId}/commentary`);
   es.onmessage = (msg) => {
     try {
       onEvent(JSON.parse(msg.data) as LiveEvent);
@@ -527,7 +544,7 @@ export const voice = {
   status: () => get<VoiceStatus>("/voice/status"),
   /** Synthesize speech on-device; returns a playable WAV blob. */
   speak: async (text: string): Promise<Blob> => {
-    const r = await fetch("/api/voice/speak", {
+    const r = await fetch(`${API_BASE}/api/voice/speak`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ text }),
@@ -537,7 +554,7 @@ export const voice = {
   },
   /** Transcribe a 16 kHz mono WAV on-device (Whisper). */
   transcribe: async (wav: Blob): Promise<{ text: string }> => {
-    const r = await fetch("/api/voice/transcribe", {
+    const r = await fetch(`${API_BASE}/api/voice/transcribe`, {
       method: "POST",
       headers: { "Content-Type": "audio/wav" },
       body: wav,
@@ -549,7 +566,7 @@ export const voice = {
 
 /** Freeform voice Q&A: stream a Gaffer answer to a question about a fixture. */
 export function streamAsk(fixtureId: string, question: string, onEvent: (e: GafferEvent) => void): () => void {
-  const es = new EventSource(`/api/gaffer/${fixtureId}/ask?q=${encodeURIComponent(question)}`);
+  const es = new EventSource(`${API_BASE}/api/gaffer/${fixtureId}/ask?q=${encodeURIComponent(question)}`);
   es.onmessage = (msg) => {
     try {
       onEvent(JSON.parse(msg.data) as GafferEvent);
@@ -582,7 +599,7 @@ export type GafferEvent =
 
 /** Opens an SSE connection to the on-device pundit. Returns a cleanup fn. */
 export function streamGaffer(fixtureId: string, onEvent: (e: GafferEvent) => void): () => void {
-  const es = new EventSource(`/api/gaffer/${fixtureId}`);
+  const es = new EventSource(`${API_BASE}/api/gaffer/${fixtureId}`);
   es.onmessage = (msg) => {
     try {
       onEvent(JSON.parse(msg.data) as GafferEvent);

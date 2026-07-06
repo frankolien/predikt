@@ -18,7 +18,7 @@ import { Card, Eyebrow, Pill, LiveDot, Reveal, Button } from "../components/ui";
 import { Onboard } from "../components/Onboard";
 import { BootScreen } from "../components/BootScreen";
 import { useApp } from "../context";
-import { type AiStatus } from "../lib/api";
+import { type AiStatus, aiLive } from "../lib/api";
 import { usdt, shortAddr } from "../lib/format";
 
 /* ------------------------------------------------------------------ */
@@ -156,16 +156,16 @@ const MODULES: Module[] = [
     to: "/predict",
     tag: "LIVE",
     icon: Sparkles,
-    tracks: ["WDK", "QVAC"],
+    tracks: ["WDK"],
   },
   {
     name: "Organize",
     tagline: "knockout tournaments",
-    desc: "Run a Cup with a real entry fee. The Gaffer seeds the draw, scores advance the bracket, the pot auto-pays the winner.",
+    desc: "Run a Cup with a real entry fee. Seed the draw, scores advance the bracket, the pot auto-pays the winner.",
     to: "/organize",
     tag: "NEW",
     icon: Trophy,
-    tracks: ["WDK", "QVAC"],
+    tracks: ["WDK"],
   },
   {
     name: "Fantasy",
@@ -174,7 +174,7 @@ const MODULES: Module[] = [
     to: "/fantasy",
     tag: "NEW",
     icon: Users,
-    tracks: ["WDK", "QVAC"],
+    tracks: ["WDK"],
   },
   {
     name: "Access",
@@ -183,14 +183,6 @@ const MODULES: Module[] = [
     tag: "SOON",
     icon: Ticket,
     tracks: ["WDK"],
-  },
-  {
-    name: "Coach",
-    tagline: "on-device tactics",
-    desc: "The Gaffer as your assistant manager — opponent reads, line-ups and drills, generated privately on your device.",
-    tag: "SOON",
-    icon: Cpu,
-    tracks: ["QVAC"],
   },
 ];
 
@@ -267,46 +259,42 @@ function TagPill({ tag }: { tag: Tag }) {
 export default function Hub() {
   const { health, account } = useApp();
   if (!health) return <BootScreen health={health} />;
+  const showAi = aiLive(health.ai);
 
   return (
     <main className="mx-auto max-w-[1180px] px-6 pb-24 pt-24">
       <Reveal>
         <Eyebrow className="mb-2">predikt · the football economy</Eyebrow>
         <h1 className="max-w-2xl font-display text-[40px] font-semibold leading-[1.02] tracking-[-0.03em] text-chalk">
-          One wallet. One AI. <span className="text-gradient">Every way to play</span> the World Cup.
+          One wallet. <span className="text-gradient">Every way to play</span> the World Cup.
         </h1>
         <p className="mt-3 max-w-xl text-[15px] leading-relaxed text-silver">
-          Predict, organize, and play fantasy — all on one self-custodial USD₮ wallet, with a private
-          AI pundit that runs on your device. Real money in, real money out. No cloud, no custody.
+          Predict, organize, and play fantasy — all on one self-custodial USD₮ wallet. Real money in,
+          real money out. Your keys, your money, no custody.
         </p>
       </Reveal>
 
-      <div className="mt-9 grid gap-5 lg:grid-cols-2">
+      <div className={`mt-9 grid gap-5 ${showAi ? "lg:grid-cols-2" : ""}`}>
         {account ? (
-          <>
-            <Reveal delay={0.05}>
-              <MoneySpine />
-            </Reveal>
-            <Reveal delay={0.1}>
-              <AiSpine ai={health.ai} />
-            </Reveal>
-          </>
+          <Reveal delay={0.05}>
+            <MoneySpine />
+          </Reveal>
         ) : (
-          <>
-            <Reveal delay={0.05}>
-              <Onboard />
-            </Reveal>
-            <Reveal delay={0.1}>
-              <AiSpine ai={health.ai} />
-            </Reveal>
-          </>
+          <Reveal delay={0.05}>
+            <Onboard />
+          </Reveal>
+        )}
+        {showAi && (
+          <Reveal delay={0.1}>
+            <AiSpine ai={health.ai} />
+          </Reveal>
         )}
       </div>
 
       <div className="mt-11 flex items-center justify-between">
         <Eyebrow>modules</Eyebrow>
         <span className="hidden font-mono text-[11px] text-faint sm:block">
-          two tracks · one platform — WDK money · QVAC intelligence
+          one platform · one wallet — self-custodial USD₮ under every game
         </span>
       </div>
       <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">

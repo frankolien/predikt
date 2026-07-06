@@ -1,4 +1,4 @@
-import { ArrowRight, User, Layers, Sparkles, Coins } from "lucide-react";
+import { ArrowRight, User, Layers, Coins, ShieldCheck } from "lucide-react";
 import { Link } from "react-router-dom";
 import { motion, useReducedMotion } from "motion/react";
 import { TacticsBoard } from "../components/TacticsBoard";
@@ -8,7 +8,7 @@ import { useApp } from "../context";
 const STEPS = [
   { icon: User, t: "Grab a handle", d: "No signup wall. Start with 1,000 points, and connect a self-custodial USD₮ wallet whenever you want real stakes." },
   { icon: Layers, t: "Pick your game", d: "Call a live tie in Predict, run a knockout in Organize, or manage a fantasy XI — same wallet, same table." },
-  { icon: Sparkles, t: "Ask the Gaffer", d: "A private, on-device AI pundit reads every tie and reacts live as the goals go in. No cloud, your data stays yours." },
+  { icon: ShieldCheck, t: "Your keys, your money", d: "The USD₮ wallet is self-custodial — buy-ins sit in escrow, never with us. Play free in points, or stake real USD₮ any time." },
   { icon: Coins, t: "Settle up", d: "Pots pay out at full time — in points, or on-chain USD₮ with a real tx hash. Then climb the leaderboard." },
 ];
 
@@ -45,8 +45,8 @@ export default function Landing() {
 
             <motion.p {...rise(0.18)} className="mt-7 max-w-[46ch] text-[clamp(14px,1.6vw,17px)] leading-relaxed text-silver">
               Predict live ties, run knockout cups and manage a fantasy XI of real World Cup
-              players — all under one self-custodial <span className="text-chalk">USD₮ wallet</span> and one
-              on-device AI pundit, <span className="text-chalk">the Gaffer</span>. Free to play; real money when you want it.
+              players — all under one self-custodial <span className="text-chalk">USD₮ wallet</span>: buy-ins to
+              escrow, payouts on-chain to you. Free to play; real money when you want it.
             </motion.p>
 
             <motion.div {...rise(0.26)} className="mt-8 flex flex-wrap items-center gap-4">
@@ -104,14 +104,13 @@ export default function Landing() {
             <div className="font-display text-[20px] font-semibold tracking-[-0.03em] text-chalk">Predikt</div>
             <p className="mt-1 max-w-md text-[13px] text-steel">
               The all-in-one football club — predict, organize and play fantasy with your mates, under one
-              self-custodial USD₮ wallet and a private AI pundit that runs on-device and never phones home.
+              self-custodial USD₮ wallet. Your keys, your money, real on-chain settlement.
             </p>
           </div>
           <div className="flex flex-col gap-1.5 font-mono text-[11px] text-faint sm:items-end">
             <span>points · free to play</span>
             <span>USD₮ · {health?.chainReady ? "self-custodial (WDK)" : "—"}</span>
-            <span>AI · {health?.ai?.state === "ready" ? "on-device (QVAC)" : health?.ai?.state ?? "—"}</span>
-            <span className="text-steel">private pundit · no cloud · your data stays yours</span>
+            <span className="text-steel">your keys · on-chain payouts · no custody</span>
           </div>
         </div>
       </footer>

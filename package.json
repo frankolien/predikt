@@ -18,6 +18,7 @@
   "scripts": {
     "setup": "npm install && npm run contracts:build",
     "demo": "node scripts/demo.mjs",
+    "tunnel": "node scripts/tunnel.mjs",
     "chain": "anvil --silent",
     "contracts:build": "forge build --root contracts",
     "server": "npm -w server run dev",

@@ -4,7 +4,8 @@ import { Flag, Eyebrow, LiveDot } from "../ui";
 import { FantasyPitch, type PitchPlayer } from "./FantasyPitch";
 import { PlayerHoverCard } from "./PlayerHoverCard";
 import { SpeakButton } from "../SpeakButton";
-import { api, streamFantasyAI, type FantasyPlayer, type FantasyPosition, type FantasyChip } from "../../lib/api";
+import { api, streamFantasyAI, aiLive, type FantasyPlayer, type FantasyPosition, type FantasyChip } from "../../lib/api";
+import { useApp } from "../../context";
 
 const POSITIONS: FantasyPosition[] = ["GK", "DEF", "MID", "FWD"];
 const SQUAD_QUOTA: Record<FantasyPosition, number> = { GK: 2, DEF: 5, MID: 5, FWD: 3 };
@@ -35,6 +36,7 @@ function xiValid(starters: FantasyPlayer[]): boolean {
 }
 
 export function SquadBuilder({ onChange }: { onChange: (s: SquadState) => void }) {
+  const { health } = useApp();
   const [players, setPlayers] = useState<FantasyPlayer[]>([]);
   const [sel, setSel] = useState<string[]>([]);
   const [starterSet, setStarterSet] = useState<Set<string>>(new Set());
@@ -270,8 +272,8 @@ export function SquadBuilder({ onChange }: { onChange: (s: SquadState) => void }
 
         {errs.length > 0 && sel.length > 0 && <p className="mt-3 font-mono text-[10px] text-steel">{errs.join(" · ")}</p>}
 
-        {/* gaffer review */}
-        {starters.length > 0 && (
+        {/* gaffer review — only when the on-device model is live */}
+        {aiLive(health?.ai) && starters.length > 0 && (
           <div className="mt-4 border-t border-edge pt-3">
             {!aiText && !aiRun ? (
               <button

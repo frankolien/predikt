@@ -106,7 +106,7 @@ function Home({
         </h1>
         <p className="mt-3 max-w-xl text-[15px] leading-relaxed text-silver">
           Draft a 15-man squad under 100 credits, name your XI, captain and vice, then join a mini-league.
-          Your XI scores live off the real feed — bench players auto-sub in, and the Gaffer drafts and gives his verdict on-device.
+          Your XI scores live off the real feed — bench players auto-sub in, and the prize pool pays out to the winners.
         </p>
       </Reveal>
 

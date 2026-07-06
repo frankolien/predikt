@@ -20,7 +20,7 @@ import { CreateCup } from "../components/organize/CreateCup";
 import { CupBracket } from "../components/organize/CupBracket";
 import { GafferDirector } from "../components/organize/GafferDirector";
 import { useApp } from "../context";
-import { api, type Tournament } from "../lib/api";
+import { api, aiLive, type Tournament } from "../lib/api";
 import { usdt, shortHash } from "../lib/format";
 
 export default function Organize() {
@@ -124,11 +124,11 @@ function Home({
       <Reveal>
         <Eyebrow className="mb-2">organize · knockout cups</Eyebrow>
         <h1 className="max-w-2xl font-display text-[38px] font-semibold leading-[1.03] tracking-[-0.03em] text-chalk">
-          Run a Cup. <span className="text-gradient">The Gaffer runs the rest.</span>
+          Run a Cup. <span className="text-gradient">The pot runs itself.</span>
         </h1>
         <p className="mt-3 max-w-xl text-[15px] leading-relaxed text-silver">
-          Set an entry, share a code, and let the pot fill. The Gaffer seeds the draw and calls it,
-          scores advance the bracket live, and the winner gets paid automatically.
+          Set an entry, share a code, and let the pot fill. Seed the draw, scores advance the bracket
+          live, and the winner gets paid automatically — on-chain USD₮ or points.
         </p>
       </Reveal>
 
@@ -201,7 +201,7 @@ function Detail({
   onChange: (t: Tournament) => void;
   onBack: () => void;
 }) {
-  const { wallet, connectWallet } = useApp();
+  const { wallet, connectWallet, health } = useApp();
   const [busy, setBusy] = useState<string | null>(null);
   const [reporting, setReporting] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -310,11 +310,13 @@ function Detail({
         </div>
       ) : (
         <div className="mt-7 space-y-6">
-          <GafferDirector
-            tournamentId={t.id}
-            kind={t.status === "completed" ? "trophy" : "draw"}
-            title={t.status === "completed" ? "the gaffer · trophy lift" : "the gaffer · the draw"}
-          />
+          {aiLive(health?.ai) && (
+            <GafferDirector
+              tournamentId={t.id}
+              kind={t.status === "completed" ? "trophy" : "draw"}
+              title={t.status === "completed" ? "the gaffer · trophy lift" : "the gaffer · the draw"}
+            />
+          )}
           <Card className="p-5">
             <div className="mb-3 flex items-center justify-between">
               <Eyebrow>the bracket</Eyebrow>

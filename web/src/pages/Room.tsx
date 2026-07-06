@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { api, streamFixtures, type FixtureSummary, type PointsPool } from "../lib/api";
+import { api, streamFixtures, aiLive, type FixtureSummary, type PointsPool } from "../lib/api";
 import { useApp } from "../context";
 import { BootScreen } from "../components/BootScreen";
 import { FixtureRail } from "../components/FixtureRail";
@@ -30,6 +30,7 @@ export default function Room() {
   const [lbKey, setLbKey] = useState(0);
 
   const ready = !!health; // server reachable — the points product doesn't need the chain
+  const showAi = aiLive(health?.ai); // hide the on-device pundit widgets when the backend is scripted
 
   const refreshFixtures = useCallback(() => {
     api.fixtures().then(setFixtures).catch(() => {});
@@ -134,14 +135,14 @@ export default function Room() {
       <div className="mt-6 grid gap-5 lg:grid-cols-[1.05fr_0.95fr]">
         <div className="space-y-5">
           {fixture && <Scorebug fixture={fixture} />}
-          {fixture && isLive && <LiveReaction fixtureId={fixture.id} scoreKey={scoreKey} />}
+          {fixture && isLive && showAi && <LiveReaction fixtureId={fixture.id} scoreKey={scoreKey} />}
           {activePool && <PoolStandings pool={activePool} fixture={fixture} meId={account?.id} />}
           <Leaderboard meId={account?.id} refreshKey={lbKey} />
         </div>
 
         <div className="space-y-5">
           {!account && <Onboard />}
-          {fixture && fixtureId && (
+          {showAi && fixture && fixtureId && (
             <GafferPanel
               key={fixtureId}
               fixtureId={fixtureId}
@@ -167,7 +168,7 @@ export default function Room() {
                 </p>
               </Card>
             ))}
-          {fixtureId && <VoiceAsk fixtureId={fixtureId} status={voiceStatus} />}
+          {showAi && fixtureId && <VoiceAsk fixtureId={fixtureId} status={voiceStatus} />}
         </div>
       </div>
     </main>
