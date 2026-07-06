@@ -10,6 +10,7 @@ const USDT_BUYINS = [1, 5, 10, 25];
 
 function friendly(msg: string): string {
   const m = (msg || "").toLowerCase();
+  if (m.includes("unknown fan wallet") || m.includes("warming up")) return "Unlock your wallet with your PIN to stake real USD₮.";
   if (m.includes("insufficient")) return "Not enough points for that buy-in.";
   if (m.includes("already joined")) return "You're already in that pool.";
   if (m.includes("locked")) return "That tie has kicked off — calls are closed.";

@@ -7,6 +7,7 @@ import { impliedReturn, oddsLabel, outcomeText, shortHash, usdt } from "../lib/f
 /** Turn a raw API/contract error into a short, human line. */
 function friendlyError(msg: string): string {
   const m = (msg || "").toLowerCase();
+  if (m.includes("unknown fan wallet") || m.includes("warming up")) return "Unlock your wallet with your PIN to stake real USD₮.";
   if (m.includes("locked")) return "This tie has kicked off — predictions are closed.";
   if (m.includes("already joined") || m.includes("already")) return "This wallet has already called this tie.";
   if (m.includes("insufficient") || m.includes("balance")) return "Not enough USDT in this wallet for the buy-in.";

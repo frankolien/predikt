@@ -1,10 +1,11 @@
 import { useState } from "react";
-import { Coins, ArrowRight, Wallet, KeyRound, Copy, Check, Loader2 } from "lucide-react";
+import { Coins, ArrowRight, Wallet, KeyRound, Copy, Check, Loader2, Lock } from "lucide-react";
 import { Button, Card, Eyebrow, Pill } from "./ui";
 import { useApp } from "../context";
 import { api, type WalletAuth } from "../lib/api";
+import { saveSeed } from "../lib/vault";
 
-type View = "create" | "reveal" | "restore";
+type View = "create" | "reveal" | "restore" | "setpin";
 
 /**
  * Wallet-as-identity onboarding. Your self-custodial WDK wallet IS your account:
@@ -12,7 +13,7 @@ type View = "create" | "reveal" | "restore";
  * and that same phrase signs you back in — and recovers you — on any device.
  */
 export function Onboard({ onDone }: { onDone?: () => void }) {
-  const { commitAuth, restoreAccount } = useApp();
+  const { commitAuth } = useApp();
   const [view, setView] = useState<View>("create");
   const [handle, setHandle] = useState("");
   const [busy, setBusy] = useState(false);
@@ -25,6 +26,10 @@ export function Onboard({ onDone }: { onDone?: () => void }) {
 
   // restore
   const [phrase, setPhrase] = useState("");
+
+  // set-PIN (secures the seed on this device, then the session goes live)
+  const [pin, setPin] = useState("");
+  const [pin2, setPin2] = useState("");
 
   const create = async () => {
     setBusy(true);
@@ -54,10 +59,12 @@ export function Onboard({ onDone }: { onDone?: () => void }) {
     }
   };
 
+  // After the phrase is saved (create) or entered (restore), secure it on this
+  // device with a PIN before the session goes live — so the signing key can be
+  // re-loaded on a later visit without re-typing 12 words.
   const finishReveal = () => {
     if (!auth) return;
-    commitAuth(auth); // session goes live now that the phrase is saved
-    onDone?.();
+    setView("setpin");
   };
 
   const restore = async () => {
@@ -66,13 +73,38 @@ export function Onboard({ onDone }: { onDone?: () => void }) {
     setBusy(true);
     setError(null);
     try {
-      await restoreAccount(m);
-      onDone?.();
+      const r = await api.auth.restore(m); // validates the phrase + loads the key server-side
+      setAuth(r);
+      setView("setpin");
     } catch (e) {
       setError((e as Error).message || "Couldn't restore — check your phrase.");
     } finally {
       setBusy(false);
     }
+  };
+
+  // The seed to encrypt: a brand-new wallet returns it once as auth.mnemonic; a
+  // restore uses the phrase the user just typed.
+  const seed = auth?.mnemonic || phrase.trim();
+
+  const setPinAndGo = async () => {
+    if (!auth || pin.length < 4 || pin !== pin2) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await saveSeed(seed, pin);
+      commitAuth(auth); // session goes live, now with the seed secured on-device
+      onDone?.();
+    } catch {
+      setError("Couldn't set your PIN — try again.");
+      setBusy(false);
+    }
+  };
+
+  const skipPin = () => {
+    if (!auth) return;
+    commitAuth(auth);
+    onDone?.();
   };
 
   const inputCls =
@@ -142,6 +174,59 @@ export function Onboard({ onDone }: { onDone?: () => void }) {
         <Button variant="solid" onClick={finishReveal} disabled={!saved} className="mt-3.5 w-full">
           Enter Predikt <ArrowRight size={13} />
         </Button>
+      </Card>
+    );
+  }
+
+  /* ---------------- setpin: secure the seed on this device ---------------- */
+  if (view === "setpin") {
+    const mismatch = pin2.length > 0 && pin !== pin2;
+    const ok = pin.length >= 4 && pin === pin2;
+    return (
+      <Card className="p-5">
+        <div className="flex items-center justify-between">
+          <Eyebrow className="mb-0 text-live">last step · on this device</Eyebrow>
+          <Pill strong>
+            <Lock size={11} /> set a PIN
+          </Pill>
+        </div>
+        <h3 className="mt-2 font-display text-[20px] font-semibold text-chalk">Secure your wallet</h3>
+        <p className="mt-1 text-[13px] leading-relaxed text-silver">
+          Pick a PIN to encrypt your keys on this device. You'll enter it to unlock the wallet on your
+          next visit — it never leaves your device, and it's what lets you stake real USD₮ without
+          re-typing your phrase.
+        </p>
+
+        <input
+          type="password"
+          inputMode="numeric"
+          autoFocus
+          value={pin}
+          onChange={(e) => setPin(e.target.value)}
+          placeholder="choose a PIN (4+ digits)"
+          className="mt-3.5 w-full rounded-default border border-edge-2 bg-panel-2 px-3 py-2.5 text-center font-mono text-[16px] tracking-[0.3em] text-chalk placeholder:tracking-normal placeholder:text-faint focus:border-edge-3 focus:outline-none"
+        />
+        <input
+          type="password"
+          inputMode="numeric"
+          value={pin2}
+          onChange={(e) => setPin2(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && ok && setPinAndGo()}
+          placeholder="confirm PIN"
+          className="mt-2 w-full rounded-default border border-edge-2 bg-panel-2 px-3 py-2.5 text-center font-mono text-[16px] tracking-[0.3em] text-chalk placeholder:tracking-normal placeholder:text-faint focus:border-edge-3 focus:outline-none"
+        />
+        {mismatch && <p className="mt-2 text-[12.5px] text-steel">PINs don't match.</p>}
+        {error && <p className="mt-2 text-[12.5px] text-steel">{error}</p>}
+
+        <Button variant="solid" onClick={setPinAndGo} disabled={busy || !ok} className="mt-3.5 w-full">
+          {busy ? <Loader2 size={13} className="animate-spin" /> : (<>Set PIN &amp; enter <ArrowRight size={13} /></>)}
+        </Button>
+        <button
+          onClick={skipPin}
+          className="mt-3 w-full text-center text-[12px] text-faint transition-colors hover:text-steel"
+        >
+          Skip — I'll re-enter my phrase next time
+        </button>
       </Card>
     );
   }

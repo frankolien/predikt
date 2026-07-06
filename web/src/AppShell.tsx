@@ -5,11 +5,14 @@ import { AppContext } from "./context";
 import { useTheme } from "./lib/theme";
 import { Nav } from "./components/Nav";
 import { ToastProvider } from "./components/Toast";
+import { WalletUnlock } from "./components/WalletUnlock";
+import { hasVault, clearVault } from "./lib/vault";
 
 export function AppShell() {
   const [health, setHealth] = useState<Health | null>(null);
   const [account, setAccount] = useState<Account | null>(null);
   const [wallet, setWallet] = useState<Wallet | null>(null);
+  const [locked, setLocked] = useState(false);
   const { theme, toggle } = useTheme();
 
   useEffect(() => {
@@ -40,9 +43,13 @@ export function AppShell() {
       .catch(() => {});
   }, []);
 
-  // Restore an existing session on load. Poll the balance too — on a faucet
-  // chain, a reset may have just re-topped this wallet in the background.
+  // Restore an existing session on load. If an encrypted seed is on this device,
+  // raise the PIN gate so the signing key can be re-loaded (a reload or a server
+  // restart drops the in-memory key — without it, real-USD₮ actions fail). The
+  // token restore still runs in the background so points browsing works if the
+  // user chooses to skip unlocking.
   useEffect(() => {
+    if (hasVault()) setLocked(true);
     if (!getToken()) return;
     api.account
       .me()
@@ -68,9 +75,32 @@ export function AppShell() {
 
   const signOut = useCallback(() => {
     setToken(null);
+    clearVault();
+    setLocked(false);
     setAccount(null);
     setWallet(null);
   }, []);
+
+  // PIN gate handlers. Unlock decrypts the on-device seed and re-loads the
+  // signing key server-side (restore); forgetting the PIN wipes the vault and
+  // drops back to phrase recovery; skipping browses with points only.
+  const unlockWallet = useCallback(
+    async (seed: string) => {
+      await restoreAccount(seed);
+      setLocked(false);
+    },
+    // restoreAccount is stable (defined below via useCallback); listed for lint.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
+  const forgotPin = useCallback(() => {
+    clearVault();
+    setToken(null);
+    setAccount(null);
+    setWallet(null);
+    setLocked(false);
+  }, []);
+  const skipUnlock = useCallback(() => setLocked(false), []);
 
   const connectWallet = useCallback(async () => {
     const w = await api.account.connectWallet();
@@ -150,6 +180,7 @@ export function AppShell() {
         <div className="pb-16 md:pb-0">
           <Outlet />
         </div>
+        {locked && <WalletUnlock onUnlock={unlockWallet} onForgot={forgotPin} onSkip={skipUnlock} />}
       </ToastProvider>
     </AppContext.Provider>
   );

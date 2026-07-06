@@ -150,6 +150,13 @@ function Home({
   );
 }
 
+function fantasyError(msg: string): string {
+  const m = (msg || "").toLowerCase();
+  if (m.includes("unknown fan wallet") || m.includes("warming up")) return "Unlock your wallet with your PIN to stake real USD₮.";
+  if (m.includes("insufficient")) return "Not enough for that buy-in.";
+  return msg;
+}
+
 function LeagueActions({
   squad,
   onOpen,
@@ -192,7 +199,7 @@ function LeagueActions({
       refreshAccount();
       onOpen(full);
     } catch (e) {
-      setErr((e as Error).message);
+      setErr(fantasyError((e as Error).message));
     } finally {
       setBusy(null);
     }
@@ -208,7 +215,7 @@ function LeagueActions({
       refreshAccount();
       onOpen(lg);
     } catch (e) {
-      setErr((e as Error).message);
+      setErr(fantasyError((e as Error).message));
     } finally {
       setBusy(null);
     }
@@ -321,7 +328,7 @@ function LeagueDetail({
     try {
       onChange(await fn());
     } catch (e) {
-      setErr((e as Error).message);
+      setErr(fantasyError((e as Error).message));
     } finally {
       setBusy(null);
     }
