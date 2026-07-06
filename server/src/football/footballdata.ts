@@ -76,12 +76,19 @@ async function fetchMatches(code: string): Promise<FdMatch[]> {
  * advancing on-screen clock. Clamped to 1–90; a real feed minute always wins.
  */
 function liveMinute(kickoffIso: string, feedMinute: number | null | undefined): number | null {
-  if (feedMinute != null) return feedMinute;
+  if (feedMinute != null) return feedMinute; // a real feed clock always wins
   const ko = Date.parse(kickoffIso);
   if (Number.isNaN(ko)) return null;
-  const elapsed = Math.floor((Date.now() - ko) / 60_000);
-  if (elapsed < 0) return null;
-  return Math.max(1, Math.min(90, elapsed));
+  // Wall-clock minutes since kickoff. The match clock pauses ~15 min at half-time,
+  // so raw wall-clock over-counts by that break once past 45' — hold at 45' through
+  // the break and subtract it in the second half so the on-screen clock tracks the
+  // real minute far more closely (still can't beat a paid live-clock feed, but this
+  // removes the systematic +15 drift that made a 65' match read as ~80'+).
+  const wall = Math.floor((Date.now() - ko) / 60_000);
+  if (wall < 0) return null;
+  if (wall <= 45) return Math.max(1, wall); // first half
+  if (wall <= 60) return 45; // ~15-min half-time break
+  return Math.min(90, wall - 15); // second half, minus the break
 }
 
 function toRawMatch(m: FdMatch, leagueName: string): RawMatch | null {
