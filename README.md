@@ -1,6 +1,6 @@
 <div align="start">
 
-# 🏴 Predikt
+# Predikt
 
 **Self-custodial football games on USD₮.**
 
