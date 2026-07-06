@@ -314,6 +314,8 @@ export interface FantasyLeague {
   createdAt: string;
   lockedAt: string | null;
   settledAt: string | null;
+  scoreFrom?: string; // scoring epoch — only matches kicking off at/after this count
+  scoringStarted?: boolean; // has the first counted match kicked off yet?
   standings: FantasyStanding[];
 }
 

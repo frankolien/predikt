@@ -166,7 +166,6 @@ function LeagueActions({
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
-  const unit = currency === "usdt" ? "USD₮" : "pts";
 
   const guard = () => {
     if (!squad.valid) {
@@ -247,7 +246,7 @@ function LeagueActions({
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <label className="flex items-center gap-2">
-            <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-faint">buy-in · {unit}</span>
+            <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-faint">buy-in {currency === "usdt" ? "(USD₮)" : "(points)"}</span>
             <input
               type="number"
               min={0}
@@ -406,12 +405,17 @@ function LeagueDetail({
       <Card className="mt-6 p-5">
         <div className="mb-3 flex items-center justify-between">
           <Eyebrow>standings · by score</Eyebrow>
-          {lg.status === "live" && (
+          {lg.status === "live" && lg.scoringStarted !== false && (
             <span className="inline-flex items-center gap-1.5 font-mono text-[9.5px] uppercase tracking-[0.14em] text-live">
               <LiveDot /> scoring live
             </span>
           )}
         </div>
+        {lg.scoringStarted === false && lg.status !== "settled" && (
+          <p className="mb-3 rounded-default border border-edge-2 bg-panel-2 px-3 py-2 font-mono text-[10.5px] leading-relaxed text-faint">
+            Everyone starts on <span className="text-chalk">0</span> — points begin counting when the first match kicks off.
+          </p>
+        )}
         {lg.standings.length === 0 ? (
           <p className="py-6 text-center font-mono text-[12px] text-faint">No squads yet — share the code {lg.code}.</p>
         ) : (

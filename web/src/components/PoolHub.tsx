@@ -70,7 +70,6 @@ export function PoolHub({
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const unit = currency === "usdt" ? "USD₮" : "pts";
 
   useEffect(() => {
     api.pools.forFixture(fixture.id).then((r) => setPublicPools(r.pools)).catch(() => {});
@@ -164,7 +163,7 @@ export function PoolHub({
           </button>
         </div>
         <div className="mb-2 flex items-center gap-1.5">
-          <span className="label-mono mr-1">buy-in · {unit}</span>
+          <span className="label-mono mr-1">buy-in {currency === "usdt" ? "(USD₮)" : "(points)"}</span>
           {(currency === "usdt" ? USDT_BUYINS : BUYINS).map((b) => (
             <button
               key={b}

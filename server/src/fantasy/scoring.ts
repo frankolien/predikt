@@ -11,6 +11,25 @@ export interface ScoreFixture {
   away: { code: string };
   result: { homeGoals: number; awayGoals: number } | null;
   matchStatus?: 'scheduled' | 'live' | 'finished';
+  kickoff?: string | null;
+}
+
+/**
+ * Restrict a fixture set to a scoring window: only matches that kick off at or
+ * after `sinceIso` count. This gives a league (or squad) a clean 0 at creation
+ * and lets it accrue points only from matches that begin AFTER it exists —
+ * matches already live or finished when the window opens (kickoff before the
+ * line), or with no parseable kickoff, are excluded. `null` line = no window
+ * (score the whole feed, e.g. a player's all-tournament form card).
+ */
+export function fixturesSince(fixtures: ScoreFixture[], sinceIso: string | null): ScoreFixture[] {
+  if (!sinceIso) return fixtures;
+  const since = Date.parse(sinceIso);
+  if (Number.isNaN(since)) return fixtures;
+  return fixtures.filter((f) => {
+    const k = f.kickoff ? Date.parse(f.kickoff) : NaN;
+    return !Number.isNaN(k) && k >= since;
+  });
 }
 
 const GOAL_MULT: Record<Position, number> = { GK: 1, DEF: 1, MID: 2, FWD: 3 };

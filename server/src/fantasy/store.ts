@@ -17,7 +17,7 @@ import * as escrow from '../wdk/escrow.js';
 import * as manager from '../pool/manager.js';
 import { BUDGET, SQUAD_SIZE, XI_SIZE, MAX_PER_TEAM, SQUAD_QUOTA, XI_QUOTA, type Player, type Position } from './players.js';
 import { getPool, getPlayer } from './squads.js';
-import { scoreLineup, scoreTeam, type ScoreFixture, type Chip, type LineupPlayer } from './scoring.js';
+import { scoreLineup, scoreTeam, fixturesSince, type ScoreFixture, type Chip, type LineupPlayer } from './scoring.js';
 
 // Budget/prices are kept as integers ×10 (one decimal place) internally.
 const P10 = (n: number) => Math.round(n * 10);
@@ -228,6 +228,10 @@ export function validateEntry(e: EntryInput): {
 /** Deterministic full squad: 15 under budget (attack-first), default 4-4-2 XI, priciest = captain. */
 export function autoDraft(): { squadIds: string[]; starterIds: string[]; captainId: string; viceId: string } {
   const need = { ...SQUAD_QUOTA };
+  // How wide a "value band" to randomise picks over — larger = more varied squads,
+  // pulling from the top-N options instead of always the single best. Keeps the
+  // team strong (top of the band) while making no two auto-drafts identical.
+  const PICK_BAND = 5;
   // Defensive: never draft from a pool that can't form a legal squad (too few
   // nations for 15 at MAX_PER_TEAM each) — that would leave slots unfilled and crash.
   const source = canBuildSquad(listPlayers()) ? listPlayers() : getPool();
@@ -262,9 +266,16 @@ export function autoDraft(): { squadIds: string[]; starterIds: string[]; captain
       remaining[pos]--;
       // reserve enough to fill every other open slot with its cheapest options
       const affordable = budget10 - reserveFor();
-      const pick =
-        [...byPos[pos]].reverse().find((p) => !used.has(p.id) && P10(p.price) <= affordable && (teamCount[p.teamCode] || 0) < MAX_PER_TEAM) ??
-        byPos[pos].find((p) => !used.has(p.id) && (teamCount[p.teamCode] || 0) < MAX_PER_TEAM)!;
+      const eligible = byPos[pos].filter((p) => !used.has(p.id) && (teamCount[p.teamCode] || 0) < MAX_PER_TEAM);
+      const affordableList = eligible.filter((p) => P10(p.price) <= affordable);
+      // Vary the pick: pull at random from the priciest AFFORDABLE options (a value
+      // band) so two auto-drafts don't resolve to the identical XI — rather than
+      // always taking the single costliest player. If nothing's affordable at this
+      // slot, fall back to the cheapest eligible (as before) and let the safety net
+      // below reconcile the budget. The reserve above still guarantees the rest fit.
+      const pick = affordableList.length
+        ? affordableList.sort((a, b) => b.price - a.price)[Math.floor(Math.random() * Math.min(PICK_BAND, affordableList.length))]
+        : eligible.sort((a, b) => a.price - b.price)[0];
       used.add(pick.id);
       chosen.push(pick);
       teamCount[pick.teamCode] = (teamCount[pick.teamCode] || 0) + 1;
@@ -340,12 +351,19 @@ export function autoDraft(): { squadIds: string[]; starterIds: string[]; captain
     if (started[pos].length < XI_MAX[pos]) { started[pos].push(p); slots--; }
   }
   const starters: Player[] = [bp.GK[0], ...started.DEF, ...started.MID, ...started.FWD];
-  const armband = starters.slice().sort((a, b) => b.price - a.price);
+  // Armband varies too: captain a random pick from the top handful of starters by
+  // price (usually a marquee attacker), vice another from that band — so it doesn't
+  // always default to the same two names.
+  const ranked = starters.slice().sort((a, b) => b.price - a.price);
+  const capBand = ranked.slice(0, Math.min(PICK_BAND, ranked.length));
+  const captain = capBand[Math.floor(Math.random() * capBand.length)];
+  const viceBand = ranked.filter((p) => p.id !== captain.id).slice(0, Math.min(PICK_BAND, ranked.length));
+  const vice = viceBand[Math.floor(Math.random() * viceBand.length)];
   return {
     squadIds: chosen.map((p) => p.id),
     starterIds: starters.map((p) => p.id),
-    captainId: armband[0].id,
-    viceId: armband[1].id,
+    captainId: captain.id,
+    viceId: vice.id,
   };
 }
 
@@ -607,6 +625,8 @@ export interface LeagueView {
   createdAt: string;
   lockedAt: string | null;
   settledAt: string | null;
+  scoreFrom: string; // scoring epoch — only matches kicking off at/after this count
+  scoringStarted: boolean; // has the first counted match kicked off yet?
   standings: Standing[];
 }
 
@@ -614,7 +634,12 @@ export async function getLeague(id: string): Promise<LeagueView | null> {
   const lg = await row(id);
   if (!lg) return null;
   const squads = await db.select().from(fantasySquads).where(eq(fantasySquads.leagueId, id));
-  const fixtures = liveFixtures();
+  // Scoring window: only matches that kick off AFTER the league is created count,
+  // so every squad starts at 0 and the race begins at the first kickoff — no
+  // inheriting points from World Cup matches that were already played.
+  const scoreFrom = lg.createdAt.toISOString();
+  const fixtures = fixturesSince(liveFixtures(), scoreFrom);
+  const scoringStarted = fixtures.some((f) => f.matchStatus === 'live' || f.matchStatus === 'finished');
 
   const rows = await Promise.all(squads.map(async (sq) => {
     const handle = (await db.select({ handle: users.handle }).from(users).where(eq(users.id, sq.userId)).limit(1))[0]?.handle ?? '—';
@@ -701,6 +726,8 @@ export async function getLeague(id: string): Promise<LeagueView | null> {
     createdAt: lg.createdAt.toISOString(),
     lockedAt: lg.lockedAt ? lg.lockedAt.toISOString() : null,
     settledAt: lg.settledAt ? lg.settledAt.toISOString() : null,
+    scoreFrom,
+    scoringStarted,
     standings,
   };
 }
