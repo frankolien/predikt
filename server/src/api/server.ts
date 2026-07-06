@@ -415,6 +415,14 @@ export function buildApp() {
   app.get('/api/health', async () => ({
     ok: true,
     mode: config.mode,
+    network: {
+      key: config.network.key,
+      label: config.network.label,
+      kind: config.network.kind, // 'local' | 'testnet' | 'mainnet'
+      chainId: config.chainId,
+      explorer: config.network.explorer,
+      faucet: config.network.faucet,
+    },
     chainReady: manager.isReady(),
     walletBackend: manager.isReady() ? manager.walletBackend() : 'initialising',
     ai: aiStatus(),

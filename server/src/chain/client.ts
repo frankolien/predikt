@@ -11,8 +11,8 @@
 import {
   createPublicClient,
   createWalletClient,
-  defineChain,
   http,
+  type Chain,
   type PublicClient,
   type WalletClient,
   type Account,
@@ -20,12 +20,13 @@ import {
 import { mnemonicToAccount, privateKeyToAccount } from 'viem/accounts';
 import { config, TEST_MNEMONIC } from '../config.js';
 
-export const chain = defineChain({
+// The active network's chain (see config.network), with the configured RPC —
+// env override (GAFFER_RPC_URL) or the preset default.
+export const chain: Chain = {
+  ...config.network.chain,
   id: config.chainId,
-  name: config.mode === 'local' ? 'gaffer-local' : 'gaffer-testnet',
-  nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
   rpcUrls: { default: { http: [config.rpcUrl] } },
-});
+};
 
 export const operatorAccount: Account =
   config.mode === 'local'
@@ -33,7 +34,7 @@ export const operatorAccount: Account =
     : privateKeyToAccount(
         config.operatorKey ??
           (() => {
-            throw new Error('GAFFER_OPERATOR_KEY is required in testnet mode');
+            throw new Error(`GAFFER_OPERATOR_KEY is required on ${config.network.label}`);
           })(),
       );
 

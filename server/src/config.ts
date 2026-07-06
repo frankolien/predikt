@@ -1,23 +1,38 @@
 /**
  * Runtime configuration.
  *
- * Two modes:
- *  - local (default): a local `anvil` chain + a MockUSDT we deploy. Fully
- *    offline, deterministic, zero real funds — ideal for a judge to run.
- *  - testnet: point at a real testnet RPC + a real USD₮0/USDT token address.
+ * One value picks the chain — GAFFER_NETWORK (see ./chain/networks.ts):
+ *  - local (default): bundled `anvil` + a MockUSDT we deploy. Offline,
+ *    deterministic, zero real funds — ideal for a judge to run.
+ *  - arbitrum-sepolia: real persistent testnet + our test-USD₮ (auto-faucet).
+ *  - arbitrum: Arbitrum One mainnet + real USD₮0, no faucet (real money).
  *
- * The "operator" account is the tournament host: it deploys the MockUSDT and
+ * The "operator" account is the tournament host: it deploys the token +
  * per-fixture PredictionPool contracts and acts as the result oracle. It never
  * custodies fan funds — the pool contract does. Locally it's anvil account #0,
- * derived from the standard test mnemonic (so it's pre-funded with ETH).
+ * derived from the standard test mnemonic (so it's pre-funded with ETH); on a
+ * real network set GAFFER_OPERATOR_KEY to a funded key.
  */
 
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { NETWORKS, DEFAULT_NETWORK, type NetworkPreset } from './chain/networks.js';
 
 export type Mode = 'local' | 'testnet';
 
-export const MODE: Mode = (process.env.GAFFER_MODE as Mode) || 'local';
+/**
+ * Active network. Prefer GAFFER_NETWORK (local | arbitrum-sepolia | arbitrum);
+ * fall back to the legacy GAFFER_MODE (testnet → arbitrum-sepolia) so old configs
+ * still work. Flipping this one value moves the whole app between chains.
+ */
+const NETWORK_KEY =
+  process.env.GAFFER_NETWORK || // `||` so an empty env var falls through, not just undefined
+  (process.env.GAFFER_MODE === 'testnet' ? 'arbitrum-sepolia' : DEFAULT_NETWORK);
+
+export const network: NetworkPreset = NETWORKS[NETWORK_KEY] ?? NETWORKS[DEFAULT_NETWORK];
+
+// `mode` stays for back-compat: everything non-local behaves like the old testnet path.
+export const MODE: Mode = network.kind === 'local' ? 'local' : 'testnet';
 
 /** Absolute path to the built SPA (Vite output). Served by Fastify in production. */
 export const WEB_DIST = fileURLToPath(new URL('../../web/dist', import.meta.url));
@@ -37,19 +52,21 @@ export const TEST_MNEMONIC =
 
 export const config = {
   mode: MODE,
+  /** The full active-network preset (chain, explorer, faucet policy, …). */
+  network,
   port: Number(process.env.PORT || 8787),
   /** Serve the built SPA from this process (true in the single-service container). */
   serveWeb: SERVE_WEB,
   webDist: WEB_DIST,
-  rpcUrl: process.env.GAFFER_RPC_URL || 'http://127.0.0.1:8545',
-  chainId: Number(process.env.GAFFER_CHAIN_ID || (MODE === 'local' ? 31337 : 11155111)),
+  rpcUrl: process.env.GAFFER_RPC_URL || network.defaultRpc,
+  chainId: Number(process.env.GAFFER_CHAIN_ID || network.chain.id),
   usdtDecimals: 6,
   /**
-   * In local mode the operator key comes from the test mnemonic (anvil #0).
-   * In testnet mode set GAFFER_OPERATOR_KEY to a funded key.
+   * On local the operator key comes from the test mnemonic (anvil #0). On a real
+   * network set GAFFER_OPERATOR_KEY to a funded key.
    */
   operatorKey: process.env.GAFFER_OPERATOR_KEY as `0x${string}` | undefined,
-  /** Testnet USDT/USD₮0 token address; in local mode this is filled by deploy. */
+  /** USD₮ token address. Local auto-deploys a MockUSDT; testnet/mainnet set this. */
   usdtAddress: process.env.GAFFER_USDT_ADDRESS as `0x${string}` | undefined,
 } as const;
 

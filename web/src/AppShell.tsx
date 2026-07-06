@@ -40,7 +40,8 @@ export function AppShell() {
       .catch(() => {});
   }, []);
 
-  // Restore an existing session on load.
+  // Restore an existing session on load. Poll the balance too — on a faucet
+  // chain, a reset may have just re-topped this wallet in the background.
   useEffect(() => {
     if (!getToken()) return;
     api.account
@@ -48,8 +49,10 @@ export function AppShell() {
       .then((r) => {
         setAccount(r.account);
         loadWallet();
+        pollFunding();
       })
       .catch(() => setToken(null));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadWallet]);
 
   const signIn = useCallback(
@@ -120,7 +123,9 @@ export function AppShell() {
         backend: r.wallet.backend,
         usdtHuman: r.wallet.usdtHuman,
       });
-      if (r.isNew) pollFunding();
+      // Poll the balance for both new (minting) and returning accounts — a
+      // faucet-chain reset may have just re-topped a returning wallet.
+      pollFunding();
     },
     [pollFunding],
   );
@@ -140,7 +145,7 @@ export function AppShell() {
       value={{ health, account, commitAuth, restoreAccount, signIn, signOut, refreshAccount, wallet, setWallet, refreshBalance, connectWallet }}
     >
       <ToastProvider>
-        <Nav ai={health?.ai} account={account} wallet={wallet} theme={theme} onToggleTheme={toggle} />
+        <Nav ai={health?.ai} account={account} wallet={wallet} network={health?.network} theme={theme} onToggleTheme={toggle} />
         {/* pb clears the mobile bottom tab bar; none needed at md+ */}
         <div className="pb-16 md:pb-0">
           <Outlet />

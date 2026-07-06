@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link, NavLink } from "react-router-dom";
 import { Cpu, Coins, User, Sun, Moon, Wallet as WalletIcon, Copy, Check, LayoutGrid, Radio, Trophy, Users, type LucideIcon } from "lucide-react";
-import type { AiStatus, Account, Wallet } from "../lib/api";
+import type { AiStatus, Account, Wallet, NetworkInfo } from "../lib/api";
 import type { Theme } from "../lib/theme";
 import { usdt, shortAddr } from "../lib/format";
 import { cn } from "../lib/cn";
@@ -76,6 +76,29 @@ function label(model: string) {
   return model.replace(/_/g, " ").replace(/ INST.*$/i, "").trim().slice(0, 14);
 }
 
+/** Which chain we're on: DEMO (local) · TESTNET · LIVE (mainnet). */
+function NetworkBadge({ network }: { network?: NetworkInfo }) {
+  if (!network) return null;
+  const tag = network.kind === "mainnet" ? "LIVE" : network.kind === "testnet" ? "TESTNET" : "DEMO";
+  const tone =
+    network.kind === "mainnet"
+      ? "border-live/40 text-live"
+      : network.kind === "testnet"
+        ? "border-edge-3 text-chalk"
+        : "border-edge-2 text-steel";
+  const dot = network.kind === "mainnet" ? "bg-live" : network.kind === "testnet" ? "bg-chalk" : "bg-steel";
+  return (
+    <span
+      title={`${network.label} · chain ${network.chainId}`}
+      className={cn("flex items-center gap-1.5 rounded-chip border px-2 py-1 font-mono text-[10px] uppercase tracking-[0.12em]", tone)}
+    >
+      <span className={cn("h-1.5 w-1.5 rounded-full", dot)} />
+      <span className="hidden md:inline">{network.label} · </span>
+      {tag}
+    </span>
+  );
+}
+
 /** Your self-custodial USD₮ balance + a click-to-copy address. */
 function WalletChip({ wallet }: { wallet: Wallet }) {
   const [copied, setCopied] = useState(false);
@@ -114,12 +137,14 @@ export function Nav({
   ai,
   account,
   wallet,
+  network,
   theme,
   onToggleTheme,
 }: {
   ai?: AiStatus;
   account?: Account | null;
   wallet?: Wallet | null;
+  network?: NetworkInfo;
   theme?: Theme;
   onToggleTheme?: () => void;
 }) {
@@ -139,6 +164,7 @@ export function Nav({
         </div>
         <div className="flex items-center gap-2.5">
           <AiPill ai={ai} />
+          <NetworkBadge network={network} />
           {wallet && <WalletChip wallet={wallet} />}
           {account ? (
             <div className="flex items-center gap-2 rounded-chip border border-edge-2 py-1 pl-1 pr-2.5">

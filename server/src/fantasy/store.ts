@@ -47,14 +47,26 @@ function activeTeamCodes(): Set<string> | null {
   }
 }
 
+/** Can a legal 15-man squad actually be drafted from this pool? Needs enough
+ *  distinct nations (max MAX_PER_TEAM each ⇒ ≥5 teams for 15, plus a buffer so
+ *  drafting stays flexible) and enough players in every position. */
+function canBuildSquad(pool: Player[]): boolean {
+  const teams = new Set(pool.map((p) => p.teamCode.toUpperCase()));
+  if (teams.size * MAX_PER_TEAM < SQUAD_SIZE + MAX_PER_TEAM) return false; // ≥6 teams
+  const byPos: Record<Position, number> = { GK: 0, DEF: 0, MID: 0, FWD: 0 };
+  for (const p of pool) byPos[p.position]++;
+  return (Object.keys(SQUAD_QUOTA) as Position[]).every((k) => byPos[k] >= SQUAD_QUOTA[k]);
+}
+
 /** The selectable pool — only players from teams still alive in the tournament.
- *  Falls back to the full pool if the feed is unavailable or the filter would
- *  leave too few players (e.g. a team-code mismatch), so it never breaks. */
+ *  Falls back to the full pool whenever the surviving teams can't form a legal
+ *  squad (e.g. the semi-finals leave just 4 nations — 4×3 < 15) or the feed is
+ *  unavailable, so drafting never breaks. */
 export function listPlayers(): Player[] {
   const active = activeTeamCodes();
   if (!active) return getPool();
   const filtered = getPool().filter((p) => active.has(p.teamCode.toUpperCase()));
-  return filtered.length >= 30 ? filtered : getPool();
+  return canBuildSquad(filtered) ? filtered : getPool();
 }
 
 function liveFixtures(): ScoreFixture[] {
@@ -216,8 +228,11 @@ export function validateEntry(e: EntryInput): {
 /** Deterministic full squad: 15 under budget (attack-first), default 4-4-2 XI, priciest = captain. */
 export function autoDraft(): { squadIds: string[]; starterIds: string[]; captainId: string; viceId: string } {
   const need = { ...SQUAD_QUOTA };
+  // Defensive: never draft from a pool that can't form a legal squad (too few
+  // nations for 15 at MAX_PER_TEAM each) — that would leave slots unfilled and crash.
+  const source = canBuildSquad(listPlayers()) ? listPlayers() : getPool();
   const byPos: Record<Position, Player[]> = { GK: [], DEF: [], MID: [], FWD: [] };
-  for (const p of listPlayers()) byPos[p.position].push(p);
+  for (const p of source) byPos[p.position].push(p);
   for (const pos of Object.keys(byPos) as Position[]) byPos[pos].sort((a, b) => a.price - b.price);
 
   const used = new Set<string>();

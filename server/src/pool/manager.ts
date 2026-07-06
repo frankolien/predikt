@@ -131,12 +131,16 @@ export async function init(): Promise<void> {
   // Re-broadcast real-feed changes to SSE subscribers (live scores/status/minute).
   onFixturesChanged((ids) => emitLive(ids));
 
-  if (config.mode === 'local') {
+  if (config.usdtAddress) {
+    // Testnet/mainnet: use the configured token (our deployed test-USD₮, or real USD₮0).
+    usdtAddress = config.usdtAddress;
+    console.log(`[pool] using USD₮ at ${usdtAddress} on ${config.network.label}`);
+  } else if (config.network.kind === 'local') {
+    // Local demo: deploy a fresh MockUSDT each boot (ephemeral chain).
     usdtAddress = await deployMockUsdt();
     console.log(`[pool] MockUSDT deployed at ${usdtAddress}`);
   } else {
-    if (!config.usdtAddress) throw new Error('GAFFER_USDT_ADDRESS required in testnet mode');
-    usdtAddress = config.usdtAddress;
+    throw new Error(`GAFFER_USDT_ADDRESS required on ${config.network.label}`);
   }
 
   // Seed the soonest real fixture so the demo has a live pool with winners & losers.
@@ -192,11 +196,30 @@ export async function getOrCreatePool(fixtureId: string, stakeHuman = DEFAULT_ST
   return pool;
 }
 
-/** Fund a wallet's gas + mint its demo USDt (local mode only; no-op on testnet). */
+/**
+ * Fund a fresh wallet's gas + mint its demo USD₮. Runs on **faucet networks**
+ * (local + testnet) and is a no-op on mainnet — real money is never minted.
+ */
 export async function fundWallet(address: Address): Promise<void> {
-  if (config.mode !== 'local') return;
-  await fundGas(address, '1');
+  if (!config.network.faucet) return;
+  await fundGas(address, config.network.gasDrip);
   await mintUsdt(usdtAddress, address, usdt(STARTING_BALANCE));
+}
+
+/**
+ * Faucet networks only: if a returning wallet has been drained to empty — e.g.
+ * the local demo chain reset on redeploy — refill it to the starting balance so
+ * testers are never stranded at 0. No-op on mainnet.
+ */
+export async function topUpIfLow(address: Address): Promise<void> {
+  if (!config.network.faucet) return;
+  try {
+    if ((await walletBalance(address)) > 0) return;
+    await fundGas(address, config.network.gasDrip).catch(() => {});
+    await mintUsdt(usdtAddress, address, usdt(STARTING_BALANCE));
+  } catch (e) {
+    console.warn(`[pool] topUpIfLow ${address} failed:`, (e as Error).message);
+  }
 }
 
 /** USDt balance of an address (human units); 0 if the read fails. */

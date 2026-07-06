@@ -88,9 +88,19 @@ export interface AiStatus {
  */
 export const aiLive = (ai?: AiStatus): boolean => !!ai?.onDevice;
 
+export interface NetworkInfo {
+  key: string;
+  label: string; // "Local" | "Arbitrum Sepolia" | "Arbitrum One"
+  kind: "local" | "testnet" | "mainnet";
+  chainId: number;
+  explorer: string; // block-explorer base, or "" when none (local)
+  faucet: boolean;
+}
+
 export interface Health {
   ok: boolean;
   mode: string;
+  network?: NetworkInfo;
   chainReady: boolean;
   walletBackend: string;
   ai: AiStatus;

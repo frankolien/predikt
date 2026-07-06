@@ -69,6 +69,7 @@ export async function createWalletAccount(handle?: string): Promise<WalletAuthRe
   // Astronomically unlikely, but if this address already has an account, resume it.
   const existing = await userByAddress(address);
   if (existing) {
+    void manager.topUpIfLow(address).catch(() => {}); // refill if a faucet-chain reset drained them
     return {
       account: { id: existing.id, handle: existing.handle, points: existing.points },
       token: await issueSession(existing.id),
@@ -104,6 +105,7 @@ export async function signInWithMnemonic(mnemonic: string, handle?: string): Pro
 
   const existing = await userByAddress(address);
   if (existing) {
+    void manager.topUpIfLow(address).catch(() => {}); // refill if a faucet-chain reset drained them
     return {
       account: { id: existing.id, handle: existing.handle, points: existing.points },
       token: await issueSession(existing.id),

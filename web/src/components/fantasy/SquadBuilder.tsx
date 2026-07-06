@@ -36,14 +36,28 @@ function xiValid(starters: FantasyPlayer[]): boolean {
   return POSITIONS.every((k) => c[k] >= XI_MIN[k] && c[k] <= XI_MAX[k]);
 }
 
+/* The in-progress squad, persisted so navigating away from /fantasy and back
+   doesn't wipe your build. Only the picks are stored (ids); prices/names come
+   back from the live pool on reload. */
+type FantasyDraft = { sel: string[]; starterIds: string[]; captain: string | null; vice: string | null; chip: FantasyChip };
+function readDraft(key: string): FantasyDraft | null {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? (JSON.parse(raw) as FantasyDraft) : null;
+  } catch {
+    return null;
+  }
+}
+
 export function SquadBuilder({ onChange }: { onChange: (s: SquadState) => void }) {
-  const { health } = useApp();
+  const { health, account } = useApp();
+  const draftKey = `predikt-fantasy-draft:${account?.id ?? "anon"}`;
   const [players, setPlayers] = useState<FantasyPlayer[]>([]);
-  const [sel, setSel] = useState<string[]>([]);
-  const [starterSet, setStarterSet] = useState<Set<string>>(new Set());
-  const [captain, setCaptain] = useState<string | null>(null);
-  const [vice, setVice] = useState<string | null>(null);
-  const [chip, setChip] = useState<FantasyChip>(null);
+  const [sel, setSel] = useState<string[]>(() => readDraft(draftKey)?.sel ?? []);
+  const [starterSet, setStarterSet] = useState<Set<string>>(() => new Set(readDraft(draftKey)?.starterIds ?? []));
+  const [captain, setCaptain] = useState<string | null>(() => readDraft(draftKey)?.captain ?? null);
+  const [vice, setVice] = useState<string | null>(() => readDraft(draftKey)?.vice ?? null);
+  const [chip, setChip] = useState<FantasyChip>(() => readDraft(draftKey)?.chip ?? null);
   const [filter, setFilter] = useState<"ALL" | FantasyPosition>("ALL");
   const [search, setSearch] = useState("");
   const [teamFilter, setTeamFilter] = useState<string>("ALL");
@@ -96,6 +110,16 @@ export function SquadBuilder({ onChange }: { onChange: (s: SquadState) => void }
   useEffect(() => {
     onChange({ squadIds: sel, starterIds: [...starterSet], captainId: captain, viceId: vice, chip, valid });
   }, [sel, starterSet, captain, vice, chip, valid]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Persist the draft so it survives leaving & returning to /fantasy; clear when emptied.
+  useEffect(() => {
+    try {
+      if (sel.length === 0) localStorage.removeItem(draftKey);
+      else localStorage.setItem(draftKey, JSON.stringify({ sel, starterIds: [...starterSet], captain, vice, chip }));
+    } catch {
+      /* storage unavailable (private mode) — draft just won't persist */
+    }
+  }, [sel, starterSet, captain, vice, chip, draftKey]);
 
   // Snackbar the moment the squad tips over the credit cap — any path (manual
   // add, auto-draft, sub). Fires only on the ≤cap → >cap crossing, not every render.
