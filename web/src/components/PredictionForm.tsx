@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
-import { Minus, Plus, Lock, ArrowUpRight } from "lucide-react";
+import { Minus, Plus, Lock } from "lucide-react";
 import { api, type FixtureSummary, type PoolView, type Wallet } from "../lib/api";
 import { Button, Card, Crest, Eyebrow, Pill } from "./ui";
-import { impliedReturn, oddsLabel, outcomeText, shortHash, usdt } from "../lib/format";
+import { ExplorerLink } from "./ExplorerLink";
+import { impliedReturn, oddsLabel, outcomeText, usdt } from "../lib/format";
 
 /** Turn a raw API/contract error into a short, human line. */
 function friendlyError(msg: string): string {
@@ -262,8 +263,7 @@ function TxRow({ label, hash }: { label: string; hash?: string }) {
   return (
     <span className="flex items-center gap-1.5 font-mono text-[10px] text-faint">
       <span className="text-steel">{label}</span>
-      {shortHash(hash)}
-      <ArrowUpRight size={10} />
+      <ExplorerLink hash={hash} />
     </span>
   );
 }

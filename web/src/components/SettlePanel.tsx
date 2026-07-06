@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
-import { Minus, Plus, Gavel, ArrowUpRight } from "lucide-react";
+import { Minus, Plus, Gavel } from "lucide-react";
 import { api, type FixtureSummary, type PoolView } from "../lib/api";
 import { Button, Card, Eyebrow } from "./ui";
-import { shortHash } from "../lib/format";
+import { ExplorerLink } from "./ExplorerLink";
 
 /**
  * Result oracle. When the real feed has a full-time score it prefills here; the
@@ -41,9 +41,9 @@ export function SettlePanel({
         <Eyebrow className="mb-1.5 flex items-center gap-2">
           <Gavel size={12} className="text-chalk" /> settled on-chain
         </Eyebrow>
-        <a className="flex items-center gap-1.5 font-mono text-[11px] text-steel hover:text-chalk">
-          settle tx {shortHash(pool.settleTx)} <ArrowUpRight size={11} />
-        </a>
+        <div className="flex items-center gap-1.5 font-mono text-[11px] text-steel">
+          settle tx <ExplorerLink hash={pool.settleTx} size={11} />
+        </div>
       </Card>
     );
   }

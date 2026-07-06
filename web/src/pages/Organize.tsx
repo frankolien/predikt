@@ -21,7 +21,8 @@ import { CupBracket } from "../components/organize/CupBracket";
 import { GafferDirector } from "../components/organize/GafferDirector";
 import { useApp } from "../context";
 import { api, aiLive, type Tournament } from "../lib/api";
-import { usdt, shortHash } from "../lib/format";
+import { usdt } from "../lib/format";
+import { ExplorerLink } from "../components/ExplorerLink";
 
 export default function Organize() {
   const { health, account, refreshAccount } = useApp();
@@ -483,7 +484,7 @@ function Payouts({ t, money }: { t: Tournament; money: (n: number) => string }) 
             <Avatar seed={p.name} size={20} />
             <div className="min-w-0 flex-1">
               <div className="truncate text-[14px] text-chalk">{p.name}</div>
-              {p.payoutTx && <div className="font-mono text-[9.5px] text-faint">paid ✓ {shortHash(p.payoutTx)}</div>}
+              {p.payoutTx && <div className="flex items-center gap-1 font-mono text-[9.5px] text-faint">paid ✓ <ExplorerLink hash={p.payoutTx} size={9} /></div>}
             </div>
             <span className="font-mono text-[12px] text-live">+{money(p.payout ?? 0)}</span>
           </div>
