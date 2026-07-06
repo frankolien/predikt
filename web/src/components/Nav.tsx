@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, NavLink } from "react-router-dom";
-import { Cpu, Coins, User, Sun, Moon, Wallet as WalletIcon, Copy, Check, LayoutGrid, Radio, Trophy, Users, type LucideIcon } from "lucide-react";
-import type { AiStatus, Account, Wallet, NetworkInfo } from "../lib/api";
+import { Cpu, Coins, User, Sun, Moon, Wallet as WalletIcon, Copy, Check, LayoutGrid, Radio, Trophy, Users, Pencil, LogOut, Loader2, type LucideIcon } from "lucide-react";
+import { api, type AiStatus, type Account, type Wallet, type NetworkInfo } from "../lib/api";
 import type { Theme } from "../lib/theme";
+import { useApp } from "../context";
 import { usdt, shortAddr } from "../lib/format";
 import { cn } from "../lib/cn";
 import { Pill, LiveDot, Avatar } from "./ui";
@@ -134,6 +135,137 @@ function WalletChip({ wallet }: { wallet: Wallet }) {
   );
 }
 
+/** Account chip → dropdown to rename your handle or sign out. */
+function AccountMenu({ account }: { account: Account }) {
+  const { signOut, refreshAccount } = useApp();
+  const [open, setOpen] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(account.handle);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const ref = useRef<HTMLDivElement>(null);
+
+  // Keep the draft in sync if the handle changes underneath us.
+  useEffect(() => setDraft(account.handle), [account.handle]);
+
+  // Close on outside-click / Escape.
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  const save = async () => {
+    const next = draft.trim();
+    if (next === account.handle) {
+      setEditing(false);
+      return;
+    }
+    setBusy(true);
+    setErr(null);
+    try {
+      await api.account.rename(next);
+      refreshAccount();
+      setEditing(false);
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="flex items-center gap-2 rounded-chip border border-edge-2 py-1 pl-1 pr-2.5 transition-colors hover:border-edge-3"
+      >
+        <Avatar seed={account.handle} size={20} />
+        <span className="hidden font-mono text-[11px] text-chalk sm:inline">{account.handle}</span>
+        <span className="flex items-center gap-1 font-mono text-[11px] text-live">
+          <Coins size={10} /> {usdt(account.points, 0)} <span className="text-faint">pts</span>
+        </span>
+      </button>
+
+      {open && (
+        <div className="absolute right-0 top-[calc(100%+8px)] z-50 w-64 rounded-default border border-edge-2 bg-void/95 p-3 shadow-[0_20px_60px_-20px_rgba(0,0,0,0.8)] backdrop-blur-md">
+          <div className="flex items-center gap-2.5">
+            <Avatar seed={account.handle} size={34} />
+            <div className="min-w-0">
+              <div className="truncate font-display text-[14px] font-semibold text-chalk">{account.handle}</div>
+              <div className="font-mono text-[10px] text-live">{usdt(account.points, 0)} pts</div>
+            </div>
+          </div>
+
+          {editing ? (
+            <div className="mt-3">
+              <span className="label-mono mb-1 block">new username</span>
+              <input
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") save();
+                  if (e.key === "Escape") {
+                    setEditing(false);
+                    setDraft(account.handle);
+                    setErr(null);
+                  }
+                }}
+                maxLength={24}
+                autoFocus
+                className="w-full rounded-default border border-edge-2 bg-panel-2 px-2.5 py-2 font-mono text-[13px] text-chalk placeholder:text-faint focus:border-edge-3 focus:outline-none"
+              />
+              {err && <p className="mt-1.5 font-mono text-[10px] text-steel">{err}</p>}
+              <div className="mt-2 flex gap-2">
+                <button
+                  onClick={() => {
+                    setEditing(false);
+                    setDraft(account.handle);
+                    setErr(null);
+                  }}
+                  className="flex-1 rounded-default px-2.5 py-1.5 font-mono text-[11px] uppercase tracking-[0.1em] text-steel hover:text-chalk"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={save}
+                  disabled={busy || draft.trim().length < 2}
+                  className="flex flex-1 items-center justify-center gap-1.5 rounded-default bg-white px-2.5 py-1.5 font-mono text-[11px] uppercase tracking-[0.1em] text-void disabled:opacity-40"
+                >
+                  {busy ? <Loader2 size={12} className="animate-spin" /> : "Save"}
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="mt-3 flex flex-col gap-0.5 border-t border-edge pt-2">
+              <button
+                onClick={() => setEditing(true)}
+                className="flex items-center gap-2 rounded-default px-2 py-2 font-mono text-[12px] text-chalk hover:bg-white/[0.04]"
+              >
+                <Pencil size={12} className="text-steel" /> Change username
+              </button>
+              <button
+                onClick={signOut}
+                className="flex items-center gap-2 rounded-default px-2 py-2 font-mono text-[12px] text-steel hover:bg-white/[0.04] hover:text-chalk"
+              >
+                <LogOut size={12} /> Sign out
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function Nav({
   ai,
   account,
@@ -168,13 +300,7 @@ export function Nav({
           <NetworkBadge network={network} />
           {wallet && <WalletChip wallet={wallet} />}
           {account ? (
-            <div className="flex items-center gap-2 rounded-chip border border-edge-2 py-1 pl-1 pr-2.5">
-              <Avatar seed={account.handle} size={20} />
-              <span className="hidden font-mono text-[11px] text-chalk sm:inline">{account.handle}</span>
-              <span className="flex items-center gap-1 font-mono text-[11px] text-live">
-                <Coins size={10} /> {usdt(account.points, 0)} <span className="text-faint">pts</span>
-              </span>
-            </div>
+            <AccountMenu account={account} />
           ) : (
             <Pill>
               <User size={11} /> guest

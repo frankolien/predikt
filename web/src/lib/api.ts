@@ -391,6 +391,7 @@ export const api = {
   account: {
     create: (handle: string) => post<{ account: Account; token: string }>("/account", { handle }),
     me: () => get<{ account: Account }>("/account"),
+    rename: (handle: string) => post<{ account: Account }>("/account/handle", { handle }),
     // self-custodial USD₮ wallet (WDK) linked to the account
     wallet: () => get<{ address: string | null; usdtHuman: number; backend?: string }>("/account/wallet"),
     connectWallet: () =>

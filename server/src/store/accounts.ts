@@ -57,6 +57,17 @@ export async function getAccount(userId: string): Promise<Account | null> {
   return u ? { id: u.id, handle: u.handle, points: u.points } : null;
 }
 
+/** Change a user's display handle (2–24 chars). Handles aren't unique — same as
+ *  sign-up — so this is a plain rename with no collision check. */
+export async function renameAccount(userId: string, handle: string): Promise<Account> {
+  const name = (handle || '').toString().trim().replace(/\s+/g, ' ').slice(0, 24);
+  if (name.length < 2) throw new Error('handle must be at least 2 characters');
+  await db.update(users).set({ handle: name }).where(eq(users.id, userId));
+  const a = await getAccount(userId);
+  if (!a) throw new Error('unknown user');
+  return a;
+}
+
 /**
  * Adjust a user's points atomically with a ledger entry. Pass the transaction
  * handle from a `db.transaction(async tx => …)` so the debit/credit and its side

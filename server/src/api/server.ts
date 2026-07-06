@@ -76,6 +76,18 @@ export function buildApp() {
     return { account: a };
   });
 
+  // Rename the signed-in account (change display handle).
+  app.post('/api/account/handle', async (req, reply) => {
+    const a = await authed(req);
+    if (!a) return reply.code(401).send({ error: 'sign in first' });
+    const { handle } = (req.body ?? {}) as { handle?: string };
+    try {
+      return { account: await accounts.renameAccount(a.id, handle ?? '') };
+    } catch (err) {
+      return reply.code(400).send({ error: (err as Error).message });
+    }
+  });
+
   app.get('/api/leaderboard', async () => ({ leaderboard: await accounts.leaderboard(20) }));
 
   // Link a self-custodial USD₮ wallet (WDK) to the signed-in account.
