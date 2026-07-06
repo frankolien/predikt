@@ -6,6 +6,7 @@ import type { Theme } from "../lib/theme";
 import { usdt, shortAddr } from "../lib/format";
 import { cn } from "../lib/cn";
 import { Pill, LiveDot, Avatar } from "./ui";
+import { Wordmark } from "./Logo";
 
 const LINKS: { to: string; label: string; icon: LucideIcon }[] = [
   { to: "/app", label: "Hub", icon: LayoutGrid },
@@ -153,8 +154,8 @@ export function Nav({
     <header className="fixed inset-x-0 top-0 z-50 border-b border-edge bg-void/80 backdrop-blur-md">
       <div className="mx-auto flex h-14 max-w-[1180px] items-center justify-between px-6">
         <div className="flex items-center gap-5">
-          <Link to="/" className="font-display text-[19px] font-semibold tracking-[-0.04em] text-chalk">
-            Predikt
+          <Link to="/" aria-label="Predikt — home">
+            <Wordmark />
           </Link>
           <nav className="hidden items-center gap-0.5 md:flex">
             {LINKS.map((l) => (

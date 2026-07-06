@@ -418,6 +418,9 @@ function LeagueDetail({
             </span>
           )}
         </div>
+        <p className="mb-3 font-mono text-[10px] leading-relaxed text-faint">
+          Scores are <span className="text-steel">team-based</span> — each player scores from their nation's result. Per-player minutes aren't in the free World Cup feed.
+        </p>
         {lg.scoringStarted === false && lg.status !== "settled" && (
           <p className="mb-3 rounded-default border border-edge-2 bg-panel-2 px-3 py-2 font-mono text-[10.5px] leading-relaxed text-faint">
             Everyone starts on <span className="text-chalk">0</span> — points begin counting when the first match kicks off.
