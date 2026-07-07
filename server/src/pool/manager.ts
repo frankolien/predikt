@@ -7,7 +7,7 @@
  * and settles pools via the operator/oracle. All money is held by the pool
  * contract; the manager only orchestrates.
  */
-import { parseEventLogs, stringToHex, type Address, type Hex } from 'viem';
+import { parseEther, parseEventLogs, stringToHex, type Address, type Hex } from 'viem';
 import { config } from '../config.js';
 import { operatorAccount, publicClient, usdt, fromUsdt } from '../chain/client.js';
 import * as artifacts from '../chain/artifacts.js';
@@ -214,9 +214,14 @@ export async function fundWallet(address: Address): Promise<void> {
 export async function topUpIfLow(address: Address): Promise<void> {
   if (!config.network.faucet) return;
   try {
-    if ((await walletBalance(address)) > 0) return;
-    await fundGas(address, config.network.gasDrip).catch(() => {});
-    await mintUsdt(usdtAddress, address, usdt(STARTING_BALANCE));
+    // Gas and USD₮ are independent: a wallet can hold USD₮ yet be stranded with no
+    // ETH to move it (e.g. minted to directly). Refuel each on its own low-water
+    // mark — checking only the USD₮ balance leaves a funded-but-gasless wallet stuck.
+    const gasFloor = parseEther(config.network.gasDrip) / 2n;
+    if ((await publicClient.getBalance({ address })) < gasFloor)
+      await fundGas(address, config.network.gasDrip).catch(() => {});
+    if ((await walletBalance(address)) <= 0)
+      await mintUsdt(usdtAddress, address, usdt(STARTING_BALANCE)).catch(() => {});
   } catch (e) {
     console.warn(`[pool] topUpIfLow ${address} failed:`, (e as Error).message);
   }

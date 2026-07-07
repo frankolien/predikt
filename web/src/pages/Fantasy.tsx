@@ -153,6 +153,8 @@ function Home({
 function fantasyError(msg: string): string {
   const m = (msg || "").toLowerCase();
   if (m.includes("unknown fan wallet") || m.includes("warming up")) return "Unlock your wallet with your PIN to stake real USD₮.";
+  if (m.includes("insufficient funds") || m.includes("gas")) return "The USD₮ rail is topping up gas — give it a few seconds and try again.";
+  if (m.includes("exceeds balance") || m.includes("transfer amount")) return "Not enough USD₮ in your wallet for that buy-in.";
   if (m.includes("insufficient")) return "Not enough for that buy-in.";
   return msg;
 }

@@ -11,6 +11,9 @@ const USDT_BUYINS = [1, 5, 10, 25];
 function friendly(msg: string): string {
   const m = (msg || "").toLowerCase();
   if (m.includes("unknown fan wallet") || m.includes("warming up")) return "Unlock your wallet with your PIN to stake real USD₮.";
+  // On-chain gas failure — the wallet has USD₮ but no ETH to move it. NOT a points issue.
+  if (m.includes("insufficient funds") || m.includes("gas")) return "The USD₮ rail is topping up gas — give it a few seconds and try again.";
+  if (m.includes("exceeds balance") || m.includes("transfer amount")) return "Not enough USD₮ in your wallet for that buy-in.";
   if (m.includes("insufficient")) return "Not enough points for that buy-in.";
   if (m.includes("already joined")) return "You're already in that pool.";
   if (m.includes("locked")) return "That tie has kicked off — calls are closed.";

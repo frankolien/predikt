@@ -33,6 +33,9 @@ export const toHuman = (base: bigint): number => Number(base) / 10 ** config.usd
 /** Collect a buy-in from a fan's self-custodial wallet into the treasury. */
 export async function collect(fromAddress: string, amountBase: bigint): Promise<string> {
   if (!ready()) throw new Error('the USD₮ rail is still warming up — try again in a moment');
+  // A fan can hold USD₮ but no gas to move it — make sure they can pay for the
+  // transfer before we ask them to. No-op on mainnet / if already funded.
+  await manager.topUpIfLow(fromAddress as Address);
   const { txHash } = await transferUsdt({
     from: fromAddress as Address,
     token: token(),
