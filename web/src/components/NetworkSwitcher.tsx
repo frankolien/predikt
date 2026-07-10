@@ -189,16 +189,23 @@ export function NetworkSwitcher({
         onClick={() => (open ? close() : setOpen(true))}
         title={`${active.label} · chain ${active.chainId} — switch network`}
         className={cn(
-          "flex items-center gap-1.5 rounded-chip border px-2 py-1 font-mono text-[10px] uppercase tracking-[0.12em] transition-colors",
-          at.text,
+          "group flex items-center gap-2 rounded-full border bg-white/[0.03] px-3 py-1.5 font-mono text-[10px] uppercase tracking-[0.12em] transition-colors hover:bg-white/[0.06]",
           at.border,
           inline && "w-full",
         )}
       >
-        <span className={cn("h-1.5 w-1.5 rounded-full", at.dot)} />
-        <span className="hidden md:inline">{active.label} · </span>
-        <span>{tagOf(active.kind)}</span>
-        <ChevronDown size={11} className={cn("ml-auto shrink-0 opacity-60 transition-transform", open && "rotate-180")} />
+        <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full", at.dot)} />
+        <span className="hidden text-steel md:inline">{active.label}</span>
+        <span className={cn("hidden opacity-40 md:inline", at.text)}>·</span>
+        <span className={at.text}>{tagOf(active.kind)}</span>
+        <ChevronDown
+          size={11}
+          className={cn(
+            "shrink-0 text-steel transition-all group-hover:text-chalk",
+            open && "rotate-180",
+            inline && "ml-auto",
+          )}
+        />
       </button>
 
       {open && inline && (

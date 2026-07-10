@@ -11,7 +11,8 @@ import {
   Sparkles,
   ArrowRight,
   ArrowUpRight,
-  ArrowDownLeft,
+  ArrowDown,
+  Send,
   ShieldCheck,
   Coins,
   Plus,
@@ -93,30 +94,32 @@ function MoneySpine() {
 
         {wallet ? (
           <div className="flex flex-col gap-4">
-            <div>
-              <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-faint">USD₮ balance</div>
-              <div className="mt-0.5 flex items-baseline gap-1.5">
-                <span className="font-display text-[36px] font-semibold leading-none text-chalk">
-                  {usdt(wallet.usdtHuman)}
-                </span>
-                <span className="font-mono text-[12px] text-steel">USD₮</span>
+            {/* balance on the left, the two money actions on the right — both a
+                solid live-green (the money moment). Wraps on a narrow card. */}
+            <div className="flex flex-wrap items-end justify-between gap-x-4 gap-y-3">
+              <div>
+                <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-faint">your balance</div>
+                <div className="mt-1 flex items-baseline gap-1.5">
+                  <span className="font-display text-[40px] font-semibold leading-none text-chalk">
+                    {usdt(wallet.usdtHuman)}
+                  </span>
+                  <span className="font-mono text-[13px] text-steel">USD₮</span>
+                </div>
               </div>
-            </div>
-
-            {/* the money moment — real self-custodial USD₮ transfers */}
-            <div className="grid grid-cols-2 gap-2.5">
-              <button
-                onClick={() => setModal("send")}
-                className="flex items-center justify-center gap-2 rounded-[12px] bg-live px-3 py-2.5 font-mono text-[11px] uppercase tracking-[0.12em] text-void shadow-[0_10px_30px_-12px_var(--color-live)] transition-transform hover:-translate-y-px"
-              >
-                <ArrowUpRight size={14} /> Send
-              </button>
-              <button
-                onClick={() => setModal("receive")}
-                className="flex items-center justify-center gap-2 rounded-[12px] border border-live/40 px-3 py-2.5 font-mono text-[11px] uppercase tracking-[0.12em] text-live transition-colors hover:bg-live/[0.08]"
-              >
-                <ArrowDownLeft size={14} /> Receive
-              </button>
+              <div className="flex gap-2.5">
+                <button
+                  onClick={() => setModal("send")}
+                  className="flex items-center justify-center gap-2 rounded-[14px] bg-live px-5 py-3 font-mono text-[11px] uppercase tracking-[0.12em] text-void shadow-[0_12px_32px_-12px_var(--color-live)] transition-transform hover:-translate-y-px"
+                >
+                  <Send size={14} /> Send
+                </button>
+                <button
+                  onClick={() => setModal("receive")}
+                  className="flex items-center justify-center gap-2 rounded-[14px] bg-live px-5 py-3 font-mono text-[11px] uppercase tracking-[0.12em] text-void transition-all hover:-translate-y-px hover:brightness-105"
+                >
+                  <ArrowDown size={14} /> Receive
+                </button>
+              </div>
             </div>
 
             <button
@@ -537,14 +540,14 @@ function AiSpine({ ai }: { ai?: AiStatus }) {
   const loading = state === "loading";
   const label = (ai?.model || "").replace(/_/g, " ").replace(/ INST.*$/i, "").trim() || "Llama 3.2";
   return (
-    <Card className="flex flex-col gap-4 p-5">
+    <Card className="flex h-full flex-col gap-4 p-5">
       <div className="flex items-center justify-between">
         <Eyebrow>the gaffer · on-device</Eyebrow>
         <Pill strong>
           <Cpu size={11} /> QVAC
         </Pill>
       </div>
-      <div className="flex flex-col gap-3">
+      <div className="flex flex-1 flex-col gap-3">
         <div className="flex items-center gap-2">
           {ready ? <LiveDot /> : <Cpu size={14} className="text-steel" />}
           <span className="font-display text-[19px] font-semibold text-chalk">
@@ -560,7 +563,7 @@ function AiSpine({ ai }: { ai?: AiStatus }) {
             <div className="h-full bg-live transition-all" style={{ width: `${Math.round((ai?.progress ?? 0) * 100)}%` }} />
           </div>
         )}
-        <div className="flex items-center justify-between border-t border-edge pt-3">
+        <div className="mt-auto flex items-center justify-between border-t border-edge pt-3">
           <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-faint">model</span>
           <span className="font-mono text-[12px] text-silver">{label}</span>
         </div>
@@ -734,18 +737,18 @@ export default function Hub() {
         </div>
       </div>
 
-      <div className={`mt-9 grid gap-5 ${showAi ? "lg:grid-cols-2" : ""}`}>
+      <div className={`mt-9 grid items-stretch gap-5 ${showAi ? "lg:grid-cols-2" : ""}`}>
         {account ? (
-          <Reveal delay={0.05}>
+          <Reveal delay={0.05} className="h-full">
             <MoneySpine />
           </Reveal>
         ) : (
-          <Reveal delay={0.05}>
+          <Reveal delay={0.05} className="h-full">
             <Onboard />
           </Reveal>
         )}
         {showAi && (
-          <Reveal delay={0.1}>
+          <Reveal delay={0.1} className="h-full">
             <AiSpine ai={health.ai} />
           </Reveal>
         )}
