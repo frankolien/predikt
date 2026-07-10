@@ -8,7 +8,7 @@ Predict live World Cup ties, run knockout cups, and play fantasy — all under o
 
 Built on **WDK** (Tether's self-custodial wallet SDK) for the **Tether Developers Cup**.
 
-**Live → [prediktt.xyz](https://prediktt.xyz)**
+**Live → [prediktt.xyz](https://www.prediktt.xyz)**
 
 </div>
 
