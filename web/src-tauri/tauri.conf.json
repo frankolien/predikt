@@ -1,0 +1,52 @@
+{
+  "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+  "productName": "Predikt",
+  "version": "0.1.0",
+  "identifier": "xyz.prediktt.app",
+  "build": {
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:5173",
+    "beforeDevCommand": "VITE_API_BASE=https://glistening-reverence-production-c01a.up.railway.app npm run dev",
+    "beforeBuildCommand": "bash ../scripts/pack-sidecar.sh && VITE_API_BASE=https://glistening-reverence-production-c01a.up.railway.app npm run build"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Predikt",
+        "width": 1200,
+        "height": 820,
+        "minWidth": 960,
+        "minHeight": 640,
+        "resizable": true,
+        "fullscreen": false,
+        "center": true,
+        "theme": "Dark",
+        "backgroundColor": "#0B0D0E",
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "resources": [
+      "resources/sidecar/**/*"
+    ],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "macOS": {
+      "minimumSystemVersion": "11.0",
+      "entitlements": "entitlements.plist",
+      "hardenedRuntime": true
+    }
+  }
+}

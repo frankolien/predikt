@@ -58,7 +58,7 @@ export default function Fantasy() {
   if (!health) return <BootScreen health={health} />;
 
   return (
-    <main className="mx-auto max-w-[1180px] px-6 pb-24 pt-24">
+    <main className="mx-auto max-w-[1180px] 2xl:max-w-[1440px] px-6 pb-24 pt-24">
       {selected ? (
         <LeagueDetail
           lg={selected}

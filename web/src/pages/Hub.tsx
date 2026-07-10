@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import {
   Wallet,
@@ -9,28 +9,31 @@ import {
   Sparkles,
   ArrowRight,
   ArrowUpRight,
+  ArrowDownLeft,
   ShieldCheck,
   Coins,
   Plus,
   Loader2,
   Copy,
   Check,
+  X,
 } from "lucide-react";
 import { Card, Eyebrow, Pill, LiveDot, Reveal, Button } from "../components/ui";
 import { Onboard } from "../components/Onboard";
 import { BootScreen } from "../components/BootScreen";
 import { useApp } from "../context";
-import { type AiStatus, aiLive } from "../lib/api";
+import { api, type AiStatus, aiLive, type Wallet as WalletT } from "../lib/api";
 import { usdt, shortAddr } from "../lib/format";
 
 /* ------------------------------------------------------------------ */
 /* Money spine — the self-custodial USD₮ wallet (WDK), plus play points */
 /* ------------------------------------------------------------------ */
 function MoneySpine() {
-  const { wallet, connectWallet, account } = useApp();
+  const { wallet, connectWallet, account, refreshBalance } = useApp();
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [modal, setModal] = useState<null | "send" | "receive">(null);
 
   const copyAddress = (address: string) => {
     navigator.clipboard
@@ -57,63 +60,221 @@ function MoneySpine() {
   };
 
   return (
-    <Card className="flex flex-col gap-4 p-5">
-      <div className="flex items-center justify-between">
-        <Eyebrow>money · self-custodial</Eyebrow>
-        <Pill strong>
-          <Wallet size={11} /> WDK
-        </Pill>
+    // The one place we spend colour: the money rail is a live-green hero card;
+    // everything around it stays monochrome.
+    <div className="relative flex h-full flex-col gap-4 overflow-hidden rounded-lg border border-live/25 bg-panel/60 p-5 backdrop-blur-sm">
+      <div
+        className="pointer-events-none absolute inset-0"
+        style={{
+          backgroundImage:
+            "radial-gradient(130% 120% at 0% 0%, color-mix(in srgb, var(--color-live) 22%, transparent), transparent 58%)",
+        }}
+      />
+      <div className="relative flex flex-1 flex-col gap-4">
+        <div className="flex items-center justify-between">
+          <Eyebrow>money · self-custodial</Eyebrow>
+          <Pill strong>
+            <Wallet size={11} /> WDK
+          </Pill>
+        </div>
+
+        {wallet ? (
+          <div className="flex flex-col gap-4">
+            <div>
+              <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-faint">USD₮ balance</div>
+              <div className="mt-0.5 flex items-baseline gap-1.5">
+                <span className="font-display text-[36px] font-semibold leading-none text-chalk">
+                  {usdt(wallet.usdtHuman)}
+                </span>
+                <span className="font-mono text-[12px] text-steel">USD₮</span>
+              </div>
+            </div>
+
+            {/* the money moment — real self-custodial USD₮ transfers */}
+            <div className="grid grid-cols-2 gap-2.5">
+              <button
+                onClick={() => setModal("send")}
+                className="flex items-center justify-center gap-2 rounded-default bg-live px-3 py-2.5 font-mono text-[11px] uppercase tracking-[0.12em] text-void shadow-[0_10px_30px_-12px_var(--color-live)] transition-transform hover:-translate-y-px"
+              >
+                <ArrowUpRight size={14} /> Send
+              </button>
+              <button
+                onClick={() => setModal("receive")}
+                className="flex items-center justify-center gap-2 rounded-default border border-live/40 px-3 py-2.5 font-mono text-[11px] uppercase tracking-[0.12em] text-live transition-colors hover:bg-live/[0.08]"
+              >
+                <ArrowDownLeft size={14} /> Receive
+              </button>
+            </div>
+
+            <button
+              onClick={() => copyAddress(wallet.address)}
+              title={copied ? "Address copied" : `Copy address · ${wallet.address}`}
+              className="group flex w-full items-center gap-2 rounded-default border border-edge bg-void/40 px-3 py-2 text-left transition-colors hover:border-edge-2"
+            >
+              <ShieldCheck size={13} className="shrink-0 text-live" />
+              <span className="font-mono text-[11px] text-silver">{shortAddr(wallet.address)}</span>
+              {copied ? (
+                <Check size={12} className="text-live" />
+              ) : (
+                <Copy size={12} className="text-steel transition-colors group-hover:text-chalk" />
+              )}
+              <span className="ml-auto font-mono text-[9.5px] uppercase tracking-[0.14em] text-faint">{wallet.backend}</span>
+            </button>
+          </div>
+        ) : (
+          <div className="flex flex-col gap-3">
+            <p className="text-[13.5px] leading-relaxed text-silver">
+              A real, non-custodial USD₮ wallet — the keys live on your device, not our server. It's the money rail under
+              every module: entry fees in, prizes straight back out.
+            </p>
+            <Button variant="solid" onClick={create} disabled={busy} className="self-start">
+              {busy ? <Loader2 size={13} className="animate-spin" /> : <Wallet size={13} />}
+              {busy ? "Connecting…" : "Connect USD₮ wallet"}
+            </Button>
+            {err && <p className="font-mono text-[11px] text-steel">{err}</p>}
+          </div>
+        )}
+
+        <div className="mt-auto flex items-center justify-between border-t border-edge/70 pt-3">
+          <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-faint">play balance</span>
+          <span className="inline-flex items-center gap-1.5 font-mono text-[13px] text-live">
+            <Coins size={12} /> {account ? usdt(account.points, 0) : "—"} pts
+          </span>
+        </div>
       </div>
 
-      {wallet ? (
-        <div className="flex flex-col gap-3">
-          <div>
-            <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-faint">USD₮ balance</div>
-            <div className="mt-0.5 flex items-baseline gap-1.5">
-              <span className="font-display text-[34px] font-semibold leading-none text-chalk">
-                {usdt(wallet.usdtHuman)}
-              </span>
-              <span className="font-mono text-[12px] text-steel">USD₮</span>
-            </div>
-          </div>
-          <button
-            onClick={() => copyAddress(wallet.address)}
-            title={copied ? "Address copied" : `Copy address · ${wallet.address}`}
-            className="group flex w-full items-center gap-2 rounded-default border border-edge bg-panel-2/60 px-3 py-2 text-left transition-colors hover:border-edge-2"
-          >
-            <ShieldCheck size={13} className="shrink-0 text-live" />
-            <span className="font-mono text-[11px] text-silver">{shortAddr(wallet.address)}</span>
-            {copied ? (
-              <Check size={12} className="text-live" />
-            ) : (
-              <Copy size={12} className="text-steel transition-colors group-hover:text-chalk" />
-            )}
-            <span className="ml-auto font-mono text-[9.5px] uppercase tracking-[0.14em] text-faint">
-              {wallet.backend}
-            </span>
+      {modal === "send" && wallet && (
+        <SendModal wallet={wallet} onClose={() => setModal(null)} onSent={refreshBalance} />
+      )}
+      {modal === "receive" && wallet && <ReceiveModal address={wallet.address} onClose={() => setModal(null)} />}
+    </div>
+  );
+}
+
+/* ---------------- send / receive USD₮ ---------------- */
+function ModalShell({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
+  return (
+    <div className="fixed inset-0 z-[90] grid place-items-center bg-void/70 px-6 backdrop-blur-sm" onClick={onClose}>
+      <div
+        className="w-full max-w-[380px] rounded-lg border border-edge-2 bg-panel p-5 shadow-[0_30px_80px_-24px_rgba(0,0,0,0.9)]"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="mb-4 flex items-center justify-between">
+          <h3 className="font-display text-[17px] font-semibold text-chalk">{title}</h3>
+          <button onClick={onClose} className="grid h-7 w-7 place-items-center rounded-chip text-steel hover:bg-white/[0.05] hover:text-chalk">
+            <X size={14} />
           </button>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function SendModal({ wallet, onClose, onSent }: { wallet: WalletT; onClose: () => void; onSent: () => void }) {
+  const [to, setTo] = useState("");
+  const [amount, setAmount] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [tx, setTx] = useState<string | null>(null);
+
+  const amt = Number(amount);
+  const valid = /^0x[a-fA-F0-9]{40}$/.test(to.trim()) && Number.isFinite(amt) && amt > 0 && amt <= wallet.usdtHuman;
+
+  const submit = async () => {
+    setBusy(true);
+    setErr(null);
+    try {
+      const r = await api.account.send(to.trim(), amt);
+      setTx(r.txHash);
+      onSent();
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <ModalShell title="Send USD₮" onClose={onClose}>
+      {tx ? (
+        <div className="flex flex-col items-center gap-3 py-2 text-center">
+          <div className="grid h-12 w-12 place-items-center rounded-full bg-live/15">
+            <Check size={22} className="text-live" />
+          </div>
+          <div className="font-display text-[16px] font-semibold text-chalk">Sent {amt} USD₮</div>
+          <p className="font-mono text-[10px] leading-relaxed text-steel break-all">{tx}</p>
+          <Button variant="solid" className="mt-1 w-full" onClick={onClose}>
+            Done
+          </Button>
         </div>
       ) : (
         <div className="flex flex-col gap-3">
-          <p className="text-[13.5px] leading-relaxed text-silver">
-            A real, non-custodial USD₮ wallet — the keys live on your device, not our server. It's the
-            money rail under every module: entry fees in, prizes straight back out.
-          </p>
-          <Button variant="solid" onClick={create} disabled={busy} className="self-start">
-            {busy ? <Loader2 size={13} className="animate-spin" /> : <Wallet size={13} />}
-            {busy ? "Connecting…" : "Connect USD₮ wallet"}
-          </Button>
+          <div>
+            <span className="label-mono mb-1 block">recipient address</span>
+            <input
+              value={to}
+              onChange={(e) => setTo(e.target.value)}
+              placeholder="0x…"
+              spellCheck={false}
+              className="w-full rounded-default border border-edge-2 bg-panel-2 px-3 py-2.5 font-mono text-[12px] text-chalk placeholder:text-faint focus:border-edge-3 focus:outline-none"
+            />
+          </div>
+          <div>
+            <div className="mb-1 flex items-center justify-between">
+              <span className="label-mono">amount</span>
+              <button
+                onClick={() => setAmount(String(wallet.usdtHuman))}
+                className="font-mono text-[10px] text-live hover:underline"
+              >
+                max {usdt(wallet.usdtHuman)}
+              </button>
+            </div>
+            <div className="flex items-center gap-2 rounded-default border border-edge-2 bg-panel-2 px-3 focus-within:border-edge-3">
+              <input
+                value={amount}
+                onChange={(e) => setAmount(e.target.value.replace(/[^0-9.]/g, ""))}
+                inputMode="decimal"
+                placeholder="0.00"
+                className="w-full bg-transparent py-2.5 font-display text-[18px] text-chalk placeholder:text-faint focus:outline-none"
+              />
+              <span className="font-mono text-[11px] text-steel">USD₮</span>
+            </div>
+          </div>
           {err && <p className="font-mono text-[11px] text-steel">{err}</p>}
+          <Button variant="solid" className="w-full" onClick={submit} disabled={busy || !valid}>
+            {busy ? <Loader2 size={13} className="animate-spin" /> : <ArrowUpRight size={13} />}
+            {busy ? "Sending…" : "Send USD₮"}
+          </Button>
+          <p className="text-center font-mono text-[9.5px] text-faint">Signed on-device by your WDK key · gas is on us</p>
         </div>
       )}
+    </ModalShell>
+  );
+}
 
-      <div className="mt-auto flex items-center justify-between border-t border-edge pt-3">
-        <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-faint">play balance</span>
-        <span className="inline-flex items-center gap-1.5 font-mono text-[13px] text-live">
-          <Coins size={12} /> {account ? usdt(account.points, 0) : "—"} pts
-        </span>
+function ReceiveModal({ address, onClose }: { address: string; onClose: () => void }) {
+  const [copied, setCopied] = useState(false);
+  const copy = () => {
+    navigator.clipboard?.writeText(address).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    });
+  };
+  return (
+    <ModalShell title="Receive USD₮" onClose={onClose}>
+      <div className="flex flex-col gap-3">
+        <p className="text-[13px] leading-relaxed text-silver">
+          Share your address to get paid in USD₮. Funds land straight in your self-custodial wallet.
+        </p>
+        <div className="break-all rounded-default border border-edge-2 bg-panel-2 px-3 py-3 font-mono text-[12px] leading-relaxed text-chalk">
+          {address}
+        </div>
+        <Button variant="solid" className="w-full" onClick={copy}>
+          {copied ? <Check size={13} /> : <Copy size={13} />} {copied ? "Copied" : "Copy address"}
+        </Button>
       </div>
-    </Card>
+    </ModalShell>
   );
 }
 
@@ -286,7 +447,7 @@ export default function Hub() {
   const showAi = aiLive(health.ai);
 
   return (
-    <main className="mx-auto max-w-[1180px] px-6 pb-24 pt-24">
+    <main className="mx-auto max-w-[1180px] 2xl:max-w-[1440px] px-6 pb-24 pt-24">
       <Reveal>
         <Eyebrow className="mb-2">predikt · the football economy</Eyebrow>
         <h1 className="max-w-2xl font-display text-[40px] font-semibold leading-[1.02] tracking-[-0.03em] text-chalk">

@@ -9,6 +9,27 @@
  */
 export const API_BASE = ((import.meta.env.VITE_API_BASE as string | undefined) ?? "").replace(/\/+$/, "");
 
+// The desktop app runs the AI + voice engine in a local, on-device sidecar (QVAC),
+// so the pundit/voice that fall back to a scripted mock in the cloud run for real
+// on the user's machine. The web build has no sidecar → AI collapses back onto the
+// same origin as everything else. Money & multiplayer data ALWAYS use API_BASE.
+const isTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+export const AI_BASE = isTauri ? "http://127.0.0.1:8799" : API_BASE;
+export const hasLocalAi = AI_BASE !== API_BASE;
+
+/** On desktop, the model's status comes from the local sidecar (the hosted
+ *  backend's AI is a scripted mock). Returns null on the web / if the sidecar
+ *  isn't up yet, so the caller keeps whatever the backend reported. */
+export async function aiStatusLocal(): Promise<AiStatus | null> {
+  if (!hasLocalAi) return null;
+  try {
+    const r = await fetch(`${AI_BASE}/api/ai/status`);
+    return r.ok ? ((await r.json()) as AiStatus) : null;
+  } catch {
+    return null;
+  }
+}
+
 export interface TeamCard {
   id: string;
   name: string;
@@ -396,6 +417,8 @@ export const api = {
     wallet: () => get<{ address: string | null; usdtHuman: number; backend?: string }>("/account/wallet"),
     connectWallet: () =>
       post<{ address: string; usdtHuman: number; backend: string; mnemonic?: string }>("/account/wallet"),
+    // send USD₮ to any address from your self-custodial wallet
+    send: (to: string, amount: number) => post<{ txHash: string; usdtHuman: number }>("/account/send", { to, amount }),
   },
   leaderboard: () => get<{ leaderboard: Account[] }>("/leaderboard"),
   pools: {
@@ -495,7 +518,7 @@ export function streamFantasyAI(
   onEvent: (e: DirectorEvent) => void,
 ): () => void {
   const qs = new URLSearchParams({ players: playerIds.join(","), captain: captainId, kind });
-  const es = new EventSource(`${API_BASE}/api/fantasy/ai?${qs.toString()}`);
+  const es = new EventSource(`${AI_BASE}/api/fantasy/ai?${qs.toString()}`);
   es.onmessage = (msg) => {
     try {
       onEvent(JSON.parse(msg.data) as DirectorEvent);
@@ -534,7 +557,7 @@ export type LiveEvent =
 
 /** SSE stream of the on-device in-play reaction. Returns a cleanup fn. */
 export function streamLiveCommentary(fixtureId: string, onEvent: (e: LiveEvent) => void): () => void {
-  const es = new EventSource(`${API_BASE}/api/live/${fixtureId}/commentary`);
+  const es = new EventSource(`${AI_BASE}/api/live/${fixtureId}/commentary`);
   es.onmessage = (msg) => {
     try {
       onEvent(JSON.parse(msg.data) as LiveEvent);
@@ -557,10 +580,14 @@ export interface VoiceStatus {
 }
 
 export const voice = {
-  status: () => get<VoiceStatus>("/voice/status"),
+  status: async (): Promise<VoiceStatus> => {
+    const r = await fetch(`${AI_BASE}/api/voice/status`);
+    if (!r.ok) throw new Error(`voice status ${r.status}`);
+    return r.json();
+  },
   /** Synthesize speech on-device; returns a playable WAV blob. */
   speak: async (text: string): Promise<Blob> => {
-    const r = await fetch(`${API_BASE}/api/voice/speak`, {
+    const r = await fetch(`${AI_BASE}/api/voice/speak`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ text }),
@@ -570,7 +597,7 @@ export const voice = {
   },
   /** Transcribe a 16 kHz mono WAV on-device (Whisper). */
   transcribe: async (wav: Blob): Promise<{ text: string }> => {
-    const r = await fetch(`${API_BASE}/api/voice/transcribe`, {
+    const r = await fetch(`${AI_BASE}/api/voice/transcribe`, {
       method: "POST",
       headers: { "Content-Type": "audio/wav" },
       body: wav,
@@ -582,7 +609,7 @@ export const voice = {
 
 /** Freeform voice Q&A: stream a Gaffer answer to a question about a fixture. */
 export function streamAsk(fixtureId: string, question: string, onEvent: (e: GafferEvent) => void): () => void {
-  const es = new EventSource(`${API_BASE}/api/gaffer/${fixtureId}/ask?q=${encodeURIComponent(question)}`);
+  const es = new EventSource(`${AI_BASE}/api/gaffer/${fixtureId}/ask?q=${encodeURIComponent(question)}`);
   es.onmessage = (msg) => {
     try {
       onEvent(JSON.parse(msg.data) as GafferEvent);
@@ -615,7 +642,7 @@ export type GafferEvent =
 
 /** Opens an SSE connection to the on-device pundit. Returns a cleanup fn. */
 export function streamGaffer(fixtureId: string, onEvent: (e: GafferEvent) => void): () => void {
-  const es = new EventSource(`${API_BASE}/api/gaffer/${fixtureId}`);
+  const es = new EventSource(`${AI_BASE}/api/gaffer/${fixtureId}`);
   es.onmessage = (msg) => {
     try {
       onEvent(JSON.parse(msg.data) as GafferEvent);

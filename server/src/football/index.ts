@@ -13,7 +13,7 @@
  * plus `initFootball`, `getFixtures`, `getMarqueeFixtureId` — so importers swap
  * the path and keep working.
  */
-import type { Fixture, Team } from '../types.js';
+import type { Fixture, Team, MatchResult, MatchStatus, Stage } from '../types.js';
 import { footballConfig } from './config.js';
 import {
   buildSnapshot,
@@ -289,6 +289,79 @@ export function getFixtures(): Fixture[] {
 
 export function getFixture(id: string): Fixture | undefined {
   return fixtures.get(id);
+}
+
+/**
+ * A fixture summary as served by the hosted backend's `GET /api/fixtures`
+ * (see `pool/manager.fixtureSummary`). The desktop AI sidecar hydrates from this
+ * instead of hitting a live provider, so its fixture ids match the ones the user
+ * is looking at exactly — no data-provider key shipped in the app.
+ */
+export interface FixtureSummaryInput {
+  id: string;
+  stage: Stage;
+  kickoff: string;
+  venue: string;
+  status: Fixture['status'];
+  result?: MatchResult | null;
+  matchStatus?: MatchStatus;
+  minute?: number | string | null;
+  league?: string | null;
+  home: TeamCardInput;
+  away: TeamCardInput;
+}
+interface TeamCardInput {
+  id: string;
+  name: string;
+  code: string;
+  flag: string;
+  fifaRank: number;
+  form?: Array<'W' | 'D' | 'L'>;
+  keyPlayer: string;
+  crest?: string | null;
+  country?: string | null;
+}
+
+/**
+ * Populate the in-memory fixture/team maps from hosted-backend summaries. Used by
+ * the desktop sidecar so on-device AI reads the same fixtures (same ids) the user
+ * sees — the one field the summary omits is `styleNote`, which the pundit prompt
+ * treats as optional context. Merges by id so a refresh updates live scores.
+ */
+export function hydrateFromSummaries(list: FixtureSummaryInput[]): number {
+  for (const s of list) {
+    for (const tc of [s.home, s.away]) {
+      teams.set(tc.id, {
+        id: tc.id,
+        name: tc.name,
+        code: tc.code,
+        flag: tc.flag,
+        fifaRank: tc.fifaRank ?? 0,
+        recentForm: tc.form ?? [],
+        keyPlayer: tc.keyPlayer,
+        styleNote: '', // not exposed by /api/fixtures — the prompt reads it as optional
+        badge: tc.crest ?? undefined,
+        country: tc.country ?? undefined,
+      });
+    }
+    fixtures.set(s.id, {
+      id: s.id,
+      stage: s.stage,
+      homeTeamId: s.home.id,
+      awayTeamId: s.away.id,
+      kickoff: s.kickoff,
+      venue: s.venue,
+      status: s.status,
+      result: s.result ?? undefined,
+      matchStatus: s.matchStatus,
+      minute: s.minute ?? null,
+      league: s.league ?? undefined,
+    });
+  }
+  mode = 'live';
+  providerName = 'hosted-summaries';
+  initialised = true;
+  return fixtures.size;
 }
 
 export function getTeam(id: string): Team {

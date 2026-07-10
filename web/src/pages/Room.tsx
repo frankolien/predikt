@@ -16,6 +16,7 @@ import { Leaderboard } from "../components/Leaderboard";
 import { Onboard } from "../components/Onboard";
 import { VoiceAsk } from "../components/VoiceAsk";
 import { useVoiceStatus } from "../lib/useVoice";
+import { notify as notifyOS } from "../lib/notify";
 import { useToast } from "../components/Toast";
 import { Card, Eyebrow } from "../components/ui";
 import { Lock } from "lucide-react";
@@ -92,6 +93,11 @@ export default function Room() {
           if (p.status === "settled") {
             refreshAccount();
             setLbKey((k) => k + 1);
+            // Native OS notification tying the settlement to the money moment.
+            const me = p.members.find((m) => m.userId === account?.id);
+            const unit = p.currency === "usdt" ? "USD₮" : "pts";
+            if (me?.won) notifyOS("🏆 You won!", `+${me.winnings ?? 0} ${unit} — ${p.name}`);
+            else if (me) notifyOS("Pool settled", `${p.name}${p.result ? ` · ${p.result.homeGoals}–${p.result.awayGoals}` : ""}`);
           }
         })
         .catch(() => {});
@@ -124,7 +130,7 @@ export default function Room() {
   if (!ready) return <BootScreen health={health} />;
 
   return (
-    <main className="mx-auto max-w-[1180px] px-6 pb-24 pt-24">
+    <main className="mx-auto max-w-[1180px] 2xl:max-w-[1440px] px-6 pb-24 pt-24">
       <div className="mb-5 flex items-end justify-between">
         <div>
           <Eyebrow className="mb-1.5">live fixtures · world cup 2026</Eyebrow>

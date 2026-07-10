@@ -5,9 +5,11 @@
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import fastifyStatic from '@fastify/static';
-import type { Address } from 'viem';
+import { isAddress, type Address } from 'viem';
 import { config } from '../config.js';
 import * as manager from '../pool/manager.js';
+import { transferUsdt } from '../wdk/wallet.js';
+import { usdt } from '../chain/client.js';
 import { streamGafferRead, streamLiveReaction, streamAsk } from '../qvac/service.js';
 import { status as aiStatus, ensureLoaded } from '../qvac/engine.js';
 import * as voice from '../qvac/voice.js';
@@ -105,6 +107,35 @@ export function buildApp() {
     const a = await authed(req);
     if (!a) return reply.code(401).send({ error: 'sign in first' });
     return (await wallets.getWallet(a.id)) ?? { address: null, usdtHuman: 0 };
+  });
+
+  // Send USD₮ from your self-custodial wallet to any address. Gas is refuelled
+  // server-side (fan wallets hold no ETH); the transfer is signed by the WDK key.
+  app.post('/api/account/send', async (req, reply) => {
+    const a = await authed(req);
+    if (!a) return reply.code(401).send({ error: 'sign in first' });
+    const b = (req.body ?? {}) as { to?: string; amount?: number };
+    const to = (b.to ?? '').trim();
+    const amount = Number(b.amount);
+    if (!isAddress(to)) return reply.code(400).send({ error: 'Enter a valid wallet address (0x…).' });
+    if (!Number.isFinite(amount) || amount <= 0) return reply.code(400).send({ error: 'Enter an amount greater than 0.' });
+    const from = await wallets.walletAddressOf(a.id);
+    if (!from) return reply.code(400).send({ error: 'Connect your USD₮ wallet first.' });
+    if (to.toLowerCase() === from.toLowerCase()) return reply.code(400).send({ error: "That's your own address." });
+    const balance = await wallets.balanceOf(from);
+    if (amount > balance) return reply.code(400).send({ error: `Not enough USD₮ — your balance is ${balance}.` });
+    try {
+      await manager.topUpIfLow(from as Address); // fan wallets hold no ETH — refuel gas first
+      const { txHash } = await transferUsdt({
+        from: from as Address,
+        token: manager.usdtToken(),
+        to: to as Address,
+        amount: usdt(amount),
+      });
+      return { txHash, usdtHuman: await wallets.balanceOf(from) };
+    } catch (err) {
+      return reply.code(500).send({ error: (err as Error).message });
+    }
   });
 
   app.post('/api/pools', async (req, reply) => {

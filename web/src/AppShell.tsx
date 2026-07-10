@@ -1,18 +1,26 @@
 import { useCallback, useEffect, useState } from "react";
 import { Outlet } from "react-router-dom";
-import { api, getToken, setToken, type Account, type Health, type Wallet, type WalletAuth } from "./lib/api";
+import { api, aiStatusLocal, streamFixtures, getToken, setToken, type Account, type Health, type Wallet, type WalletAuth } from "./lib/api";
+import { ensureNotifyPermission, notify, notifyAvailable } from "./lib/notify";
 import { AppContext } from "./context";
 import { useTheme } from "./lib/theme";
-import { Nav } from "./components/Nav";
+import { Nav, DesktopSidebar } from "./components/Nav";
 import { ToastProvider } from "./components/Toast";
 import { WalletUnlock } from "./components/WalletUnlock";
+import { DesktopOnboarding } from "./components/DesktopOnboarding";
 import { hasVault, clearVault } from "./lib/vault";
+import { keychainAvailable, keychainGet, keychainDelete, SEED_KEY } from "./lib/keychain";
+
+// The desktop shell uses a left sidebar (native-app feel); the web uses the top
+// bar. Same as the checks in App.tsx / main.tsx.
+const isDesktop = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
 export function AppShell() {
   const [health, setHealth] = useState<Health | null>(null);
   const [account, setAccount] = useState<Account | null>(null);
   const [wallet, setWallet] = useState<Wallet | null>(null);
   const [locked, setLocked] = useState(false);
+  const [showOnboard, setShowOnboard] = useState(false);
   const { theme, toggle } = useTheme();
 
   useEffect(() => {
@@ -20,6 +28,10 @@ export function AppShell() {
     const tick = async () => {
       try {
         const h = await api.health();
+        // Desktop: the real on-device model status comes from the local sidecar,
+        // not the hosted backend (whose AI is a scripted mock).
+        const localAi = await aiStatusLocal();
+        if (localAi) h.ai = localAi;
         if (active) setHealth(h);
       } catch {
         /* server warming up */
@@ -31,6 +43,26 @@ export function AppShell() {
       active = false;
       clearInterval(id);
     };
+  }, []);
+
+  // Desktop: native goal alerts from the live feed, app-wide (even off the Predict
+  // page). Fires a real OS notification when a live fixture's score ticks up.
+  useEffect(() => {
+    if (!notifyAvailable) return;
+    ensureNotifyPermission();
+    const prev = new Map<string, number>();
+    const stop = streamFixtures((fixtures) => {
+      for (const f of fixtures) {
+        const goals = (f.result?.homeGoals ?? 0) + (f.result?.awayGoals ?? 0);
+        const before = prev.get(f.id);
+        prev.set(f.id, goals);
+        const live = f.isLive || f.matchStatus === "live";
+        if (before !== undefined && goals > before && live) {
+          notify("⚽ Goal!", `${f.home.code} ${f.result?.homeGoals ?? 0}–${f.result?.awayGoals ?? 0} ${f.away.code} · ${f.minute ?? ""}'`);
+        }
+      }
+    });
+    return stop;
   }, []);
 
   // Load the account's linked self-custodial USD₮ wallet (WDK), if any.
@@ -49,7 +81,8 @@ export function AppShell() {
   // token restore still runs in the background so points browsing works if the
   // user chooses to skip unlocking.
   useEffect(() => {
-    if (hasVault()) setLocked(true);
+    // On desktop the OS keychain is the vault, so the browser PIN gate is web-only.
+    if (hasVault() && !keychainAvailable) setLocked(true);
     if (!getToken()) return;
     api.account
       .me()
@@ -76,9 +109,11 @@ export function AppShell() {
   const signOut = useCallback(() => {
     setToken(null);
     clearVault();
+    keychainDelete(SEED_KEY); // desktop: forget the seed from the OS keychain too
     setLocked(false);
     setAccount(null);
     setWallet(null);
+    if (keychainAvailable) setShowOnboard(true); // desktop: back to first-run wizard
   }, []);
 
   // PIN gate handlers. Unlock decrypts the on-device seed and re-loads the
@@ -170,17 +205,51 @@ export function AppShell() {
     [commitAuth],
   );
 
+  // Desktop: the OS keychain is the vault. On launch, if a seed is stored, restore
+  // silently (reloads the signing key too); otherwise it's a first run → wizard.
+  useEffect(() => {
+    if (!keychainAvailable) return;
+    (async () => {
+      const seed = await keychainGet(SEED_KEY);
+      if (seed) {
+        try {
+          await restoreAccount(seed);
+          return;
+        } catch {
+          /* stale seed — fall through to onboarding */
+        }
+      }
+      if (!getToken()) setShowOnboard(true);
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   return (
     <AppContext.Provider
       value={{ health, account, commitAuth, restoreAccount, signIn, signOut, refreshAccount, wallet, setWallet, refreshBalance, connectWallet }}
     >
       <ToastProvider>
-        <Nav ai={health?.ai} account={account} wallet={wallet} network={health?.network} theme={theme} onToggleTheme={toggle} />
-        {/* pb clears the mobile bottom tab bar; none needed at md+ */}
-        <div className="pb-16 md:pb-0">
-          <Outlet />
-        </div>
+        {isDesktop ? (
+          <>
+            <DesktopSidebar ai={health?.ai} account={account} wallet={wallet} network={health?.network} theme={theme} onToggleTheme={toggle} />
+            {/* draggable strip over the content, clearing the overlay title bar */}
+            <div data-tauri-drag-region className="fixed left-64 right-0 top-0 z-40 h-8" />
+            {/* offset for the fixed sidebar; clear the title bar (no top bar of our own) */}
+            <div className="pl-64 [&>main]:!pt-12">
+              <Outlet />
+            </div>
+          </>
+        ) : (
+          <>
+            <Nav ai={health?.ai} account={account} wallet={wallet} network={health?.network} theme={theme} onToggleTheme={toggle} />
+            {/* pb clears the mobile bottom tab bar; none needed at md+ */}
+            <div className="pb-16 md:pb-0">
+              <Outlet />
+            </div>
+          </>
+        )}
         {locked && <WalletUnlock onUnlock={unlockWallet} onForgot={forgotPin} onSkip={skipUnlock} />}
+        {showOnboard && <DesktopOnboarding onClose={() => setShowOnboard(false)} />}
       </ToastProvider>
     </AppContext.Provider>
   );
