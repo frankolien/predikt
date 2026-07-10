@@ -14,6 +14,7 @@ import { users } from '../db/schema.js';
 import * as manager from '../pool/manager.js';
 import { tokenBalance } from '../wdk/wallet.js';
 import * as escrow from '../wdk/escrow.js';
+import type { NetworkContext } from '../chain/context.js';
 
 export interface LinkedWallet {
   address: string;
@@ -30,6 +31,20 @@ export async function walletAddressOf(userId: string): Promise<string | null> {
 export async function balanceOf(address: string): Promise<number> {
   try {
     return escrow.toHuman(await tokenBalance(address as Address, escrow.token()));
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * Balance of an address on a SPECIFIC network (the wallet's network switch). The
+ * same self-custodial address, read against another chain's USD₮ token. Returns 0
+ * when that network has no known token (nothing to read).
+ */
+export async function balanceOfOn(address: string, ctx: NetworkContext): Promise<number> {
+  if (!ctx.usdtAddress) return 0;
+  try {
+    return escrow.toHuman(await tokenBalance(address as Address, ctx.usdtAddress, ctx));
   } catch {
     return 0;
   }

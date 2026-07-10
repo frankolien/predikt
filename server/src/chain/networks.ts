@@ -50,6 +50,13 @@ const arbitrumOne = defineChain({
   blockExplorers: { default: { name: 'Arbiscan', url: 'https://arbiscan.io' } },
 });
 
+/**
+ * Canonical USD₮ on Arbitrum One (6 decimals) — the real token a mainnet balance
+ * reads from. Overridable per network via GAFFER_USDT_ADDRESS_ARBITRUM (e.g. to
+ * point at USD₮0). Only ever used on the mainnet money path; never minted.
+ */
+export const ARBITRUM_ONE_USDT = '0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9';
+
 export const NETWORKS: Record<string, NetworkPreset> = {
   local: {
     key: 'local',
@@ -84,3 +91,27 @@ export const NETWORKS: Record<string, NetworkPreset> = {
 };
 
 export const DEFAULT_NETWORK = 'local';
+
+/** Env-var suffix for a network key: `arbitrum-sepolia` → `ARBITRUM_SEPOLIA`. */
+function envSuffix(key: string): string {
+  return key.replace(/-/g, '_').toUpperCase();
+}
+
+/**
+ * The USD₮ token for a network, for the runtime wallet-network switch. Each
+ * network can be pointed at its own token with GAFFER_USDT_ADDRESS_<KEY>
+ * (e.g. GAFFER_USDT_ADDRESS_ARBITRUM). Arbitrum One falls back to the canonical
+ * USD₮. Local/testnet have no default (local deploys one at boot; testnet is set
+ * per deploy) → undefined means "not switchable to from another network".
+ */
+export function usdtAddressFor(key: string): `0x${string}` | undefined {
+  const env = process.env[`GAFFER_USDT_ADDRESS_${envSuffix(key)}`];
+  if (env) return env as `0x${string}`;
+  if (key === 'arbitrum') return ARBITRUM_ONE_USDT as `0x${string}`;
+  return undefined;
+}
+
+/** RPC URL for a network: GAFFER_RPC_URL_<KEY> override, else the preset default. */
+export function rpcUrlFor(key: string): string {
+  return process.env[`GAFFER_RPC_URL_${envSuffix(key)}`] || (NETWORKS[key]?.defaultRpc ?? '');
+}

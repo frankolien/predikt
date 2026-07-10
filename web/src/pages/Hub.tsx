@@ -1,4 +1,6 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
+import { AnimatePresence, motion, useDragControls } from "motion/react";
 import { Link } from "react-router-dom";
 import {
   Wallet,
@@ -17,13 +19,17 @@ import {
   Copy,
   Check,
   X,
+  ClipboardPaste,
 } from "lucide-react";
 import { Card, Eyebrow, Pill, LiveDot, Reveal, Button } from "../components/ui";
+import { NetworkSwitcher } from "../components/NetworkSwitcher";
+import { AsciiBall } from "../components/AsciiBall";
 import { Onboard } from "../components/Onboard";
 import { BootScreen } from "../components/BootScreen";
 import { useApp } from "../context";
-import { api, type AiStatus, aiLive, type Wallet as WalletT } from "../lib/api";
+import { api, type AiStatus, aiLive, resolveNetwork, type NetworkInfo, type Wallet as WalletT } from "../lib/api";
 import { usdt, shortAddr } from "../lib/format";
+import { keychainAvailable, keychainGet, SEED_KEY } from "../lib/keychain";
 
 /* ------------------------------------------------------------------ */
 /* Money spine — the self-custodial USD₮ wallet (WDK), plus play points */
@@ -71,11 +77,14 @@ function MoneySpine() {
         }}
       />
       <div className="relative flex flex-1 flex-col gap-4">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between gap-2">
           <Eyebrow>money · self-custodial</Eyebrow>
-          <Pill strong>
-            <Wallet size={11} /> WDK
-          </Pill>
+          <div className="flex items-center gap-2">
+            <NetworkSwitcher />
+            <Pill strong>
+              <Wallet size={11} /> WDK
+            </Pill>
+          </div>
         </div>
 
         {wallet ? (
@@ -94,13 +103,13 @@ function MoneySpine() {
             <div className="grid grid-cols-2 gap-2.5">
               <button
                 onClick={() => setModal("send")}
-                className="flex items-center justify-center gap-2 rounded-default bg-live px-3 py-2.5 font-mono text-[11px] uppercase tracking-[0.12em] text-void shadow-[0_10px_30px_-12px_var(--color-live)] transition-transform hover:-translate-y-px"
+                className="flex items-center justify-center gap-2 rounded-[12px] bg-live px-3 py-2.5 font-mono text-[11px] uppercase tracking-[0.12em] text-void shadow-[0_10px_30px_-12px_var(--color-live)] transition-transform hover:-translate-y-px"
               >
                 <ArrowUpRight size={14} /> Send
               </button>
               <button
                 onClick={() => setModal("receive")}
-                className="flex items-center justify-center gap-2 rounded-default border border-live/40 px-3 py-2.5 font-mono text-[11px] uppercase tracking-[0.12em] text-live transition-colors hover:bg-live/[0.08]"
+                className="flex items-center justify-center gap-2 rounded-[12px] border border-live/40 px-3 py-2.5 font-mono text-[11px] uppercase tracking-[0.12em] text-live transition-colors hover:bg-live/[0.08]"
               >
                 <ArrowDownLeft size={14} /> Receive
               </button>
@@ -109,7 +118,7 @@ function MoneySpine() {
             <button
               onClick={() => copyAddress(wallet.address)}
               title={copied ? "Address copied" : `Copy address · ${wallet.address}`}
-              className="group flex w-full items-center gap-2 rounded-default border border-edge bg-void/40 px-3 py-2 text-left transition-colors hover:border-edge-2"
+              className="group flex w-full items-center gap-2 rounded-[12px] border border-edge bg-void/40 px-3 py-2 text-left transition-colors hover:border-edge-2"
             >
               <ShieldCheck size={13} className="shrink-0 text-live" />
               <span className="font-mono text-[11px] text-silver">{shortAddr(wallet.address)}</span>
@@ -143,20 +152,43 @@ function MoneySpine() {
         </div>
       </div>
 
-      {modal === "send" && wallet && (
-        <SendModal wallet={wallet} onClose={() => setModal(null)} onSent={refreshBalance} />
-      )}
-      {modal === "receive" && wallet && <ReceiveModal address={wallet.address} onClose={() => setModal(null)} />}
+      <AnimatePresence>
+        {modal === "send" && wallet && (
+          <SendModal key="send" wallet={wallet} onClose={() => setModal(null)} onSent={refreshBalance} />
+        )}
+        {modal === "receive" && wallet && (
+          <ReceiveModal key="receive" address={wallet.address} onClose={() => setModal(null)} />
+        )}
+      </AnimatePresence>
     </div>
   );
 }
 
 /* ---------------- send / receive USD₮ ---------------- */
 function ModalShell({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
-  return (
-    <div className="fixed inset-0 z-[90] grid place-items-center bg-void/70 px-6 backdrop-blur-sm" onClick={onClose}>
-      <div
-        className="w-full max-w-[380px] rounded-lg border border-edge-2 bg-panel p-5 shadow-[0_30px_80px_-24px_rgba(0,0,0,0.9)]"
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  // Portalled to <body> so the dialog escapes the money card's backdrop-filter /
+  // overflow-hidden / Reveal transform and centers on the viewport (not the card).
+  return createPortal(
+    <motion.div
+      className="fixed inset-0 z-[90] grid place-items-center bg-void/75 px-6"
+      onClick={onClose}
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      transition={{ duration: 0.16 }}
+    >
+      <motion.div
+        initial={{ opacity: 0, scale: 0.95, y: 12 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        exit={{ opacity: 0, scale: 0.96, y: 10 }}
+        transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
+        className="w-full max-w-[380px] rounded-[18px] border border-edge-2 bg-panel p-5 shadow-[0_30px_80px_-24px_rgba(0,0,0,0.9)]"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-4 flex items-center justify-between">
@@ -166,94 +198,268 @@ function ModalShell({ title, onClose, children }: { title: string; onClose: () =
           </button>
         </div>
         {children}
-      </div>
-    </div>
+      </motion.div>
+    </motion.div>,
+    document.body,
   );
 }
 
+/** Turn raw server errors into something a person can act on. */
+function friendlySendError(msg: string, net?: NetworkInfo | null): string {
+  if (/fan wallet|unknown wallet|sign in first/i.test(msg)) return "Couldn't reach your wallet key — reopen the app and try again.";
+  // On a faucet network the server auto-refuels gas, so a transient gas error just
+  // means "wait a moment". On a real network there's no faucet — the server already
+  // tells the user to fund their own wallet, so pass that message straight through.
+  if (net?.faucet && /gas|insufficient funds|\beth\b/i.test(msg)) return "Network gas is topping up — give it a moment and retry.";
+  return msg;
+}
+
 function SendModal({ wallet, onClose, onSent }: { wallet: WalletT; onClose: () => void; onSent: () => void }) {
+  const { restoreAccount, health, walletNetwork } = useApp();
+  const net = resolveNetwork(health, walletNetwork);
+  const netTag = net ? (net.kind === "mainnet" ? "LIVE" : net.kind === "testnet" ? "TESTNET" : "DEMO") : "";
   const [to, setTo] = useState("");
   const [amount, setAmount] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [tx, setTx] = useState<string | null>(null);
+  const dragControls = useDragControls();
+  const boundsRef = useRef<HTMLDivElement>(null);
 
   const amt = Number(amount);
   const valid = /^0x[a-fA-F0-9]{40}$/.test(to.trim()) && Number.isFinite(amt) && amt > 0 && amt <= wallet.usdtHuman;
 
+  // Paste the recipient — nobody types a 42-char address by hand.
+  const paste = async () => {
+    setErr(null);
+    try {
+      const t = (await navigator.clipboard.readText()).trim();
+      if (t) setTo(t);
+      else setErr("Clipboard is empty — copy an address first.");
+    } catch {
+      setErr("Couldn't read the clipboard — paste with ⌘V into the field.");
+    }
+  };
+
   const submit = async () => {
     setBusy(true);
     setErr(null);
+    const doSend = () => api.account.send(to.trim(), amt);
     try {
-      const r = await api.account.send(to.trim(), amt);
+      let r;
+      try {
+        r = await doSend();
+      } catch (e) {
+        // The server holds signing keys in memory only (self-custody) and loses
+        // them on restart/redeploy. If it can't find our wallet, re-arm it with
+        // the seed from the OS keychain, then retry once.
+        const msg = (e as Error).message || "";
+        if (/fan wallet|unknown wallet|sign in first/i.test(msg) && keychainAvailable) {
+          const seed = await keychainGet(SEED_KEY);
+          if (!seed) throw e;
+          await restoreAccount(seed);
+          r = await doSend();
+        } else throw e;
+      }
       setTx(r.txHash);
       onSent();
     } catch (e) {
-      setErr((e as Error).message);
+      setErr(friendlySendError((e as Error).message, net));
     } finally {
       setBusy(false);
     }
   };
 
-  return (
-    <ModalShell title="Send USD₮" onClose={onClose}>
-      {tx ? (
-        <div className="flex flex-col items-center gap-3 py-2 text-center">
-          <div className="grid h-12 w-12 place-items-center rounded-full bg-live/15">
-            <Check size={22} className="text-live" />
+  // Sanitised amount entry — a real input field (desktop card): digits + one dot,
+  // max 2 decimals, no leading zero. The keyboard types straight in.
+  const onAmount = (raw: string) => {
+    setErr(null);
+    let v = raw.replace(/[^0-9.]/g, "");
+    const dot = v.indexOf(".");
+    if (dot !== -1) {
+      const dec = v.slice(dot + 1).replace(/\./g, "").slice(0, 2);
+      v = v.slice(0, dot) + "." + dec;
+    }
+    v = v.replace(/^0(\d)/, "$1");
+    if (v.replace(".", "").length > 12) return;
+    setAmount(v);
+  };
+
+  // Keyboard: Enter sends, Esc closes — the amount/recipient inputs type natively.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+      else if (e.key === "Enter" && valid && !busy) submit();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [valid, busy]);
+
+  // Safety: restore text-selection if we unmount mid-drag.
+  useEffect(() => () => void (document.body.style.userSelect = ""), []);
+
+  return createPortal(
+    // No scrim — the app behind stays fully normal and interactive (Solflare-style
+    // floating window). pointer-events pass through except on the card itself.
+    <div ref={boundsRef} className="pointer-events-none fixed inset-0 z-[90] grid place-items-center px-6 py-6">
+      <motion.div
+        drag
+        dragListener={false}
+        dragControls={dragControls}
+        dragConstraints={boundsRef}
+        dragMomentum={false}
+        dragElastic={0.06}
+        initial={{ opacity: 0, scale: 0.94 }}
+        animate={{ opacity: 1, scale: 1 }}
+        exit={{ opacity: 0, scale: 0.96 }}
+        transition={{ duration: 0.24, ease: [0.16, 1, 0.3, 1] }}
+        className="pointer-events-auto relative w-full max-w-[400px]"
+      >
+        {/* desktop wallet card — a floating window (Solflare-style), not a phone */}
+        <div className="relative overflow-hidden rounded-[24px] border border-edge-2 bg-panel shadow-[0_40px_120px_-24px_rgba(0,0,0,0.92)] ring-1 ring-white/[0.05]">
+          {/* soft green wash across the top */}
+          <div
+            className="pointer-events-none absolute inset-x-0 top-0 h-28"
+            style={{
+              backgroundImage:
+                "radial-gradient(90% 100% at 50% 0%, color-mix(in srgb, var(--color-live) 11%, transparent), transparent 74%)",
+            }}
+          />
+
+          {/* header — doubles as the drag handle (grab anywhere here to move it) */}
+          <div
+            onPointerDown={(e) => {
+              // Kill page text-selection for the duration of the drag.
+              document.body.style.userSelect = "none";
+              window.addEventListener("pointerup", () => (document.body.style.userSelect = ""), { once: true });
+              dragControls.start(e);
+            }}
+            className="relative flex cursor-grab touch-none select-none items-center justify-between gap-3 border-b border-edge/70 px-4 py-3 active:cursor-grabbing"
+          >
+            <div className="flex items-center gap-2.5">
+              <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-live/15 text-live ring-1 ring-live/25">
+                <ArrowUpRight size={16} />
+              </span>
+              <div className="leading-tight">
+                <div className="font-display text-[15px] font-semibold text-chalk">Send USD₮</div>
+                {net && (
+                  <div
+                    className={`mt-0.5 flex items-center gap-1 font-mono text-[9px] uppercase tracking-[0.14em] ${net.kind === "mainnet" ? "text-live" : "text-faint"}`}
+                  >
+                    <span className={`h-1 w-1 rounded-full ${net.kind === "mainnet" ? "bg-live" : "bg-steel"}`} />
+                    {net.label} · {netTag}
+                  </div>
+                )}
+              </div>
+            </div>
+            <button
+              onClick={onClose}
+              className="grid h-8 w-8 shrink-0 place-items-center rounded-full text-steel transition-colors hover:bg-white/[0.06] hover:text-chalk"
+            >
+              <X size={16} />
+            </button>
           </div>
-          <div className="font-display text-[16px] font-semibold text-chalk">Sent {amt} USD₮</div>
-          <p className="font-mono text-[10px] leading-relaxed text-steel break-all">{tx}</p>
-          <Button variant="solid" className="mt-1 w-full" onClick={onClose}>
-            Done
-          </Button>
-        </div>
-      ) : (
-        <div className="flex flex-col gap-3">
-          <div>
-            <span className="label-mono mb-1 block">recipient address</span>
-            <input
-              value={to}
-              onChange={(e) => setTo(e.target.value)}
-              placeholder="0x…"
-              spellCheck={false}
-              className="w-full rounded-default border border-edge-2 bg-panel-2 px-3 py-2.5 font-mono text-[12px] text-chalk placeholder:text-faint focus:border-edge-3 focus:outline-none"
-            />
-          </div>
-          <div>
-            <div className="mb-1 flex items-center justify-between">
-              <span className="label-mono">amount</span>
+
+          {tx ? (
+            <div className="relative flex flex-col items-center gap-4 px-6 py-8 text-center">
+              <div className="grid h-16 w-16 place-items-center rounded-full bg-live/15 ring-1 ring-live/30">
+                <Check size={30} className="text-live" />
+              </div>
+              <div>
+                <div className="font-display text-[22px] font-semibold text-chalk">Sent</div>
+                <div className="mt-0.5 font-mono text-[13px] text-live">
+                  {amt} USD₮{net ? ` · ${net.label}` : ""}
+                </div>
+              </div>
+              {net?.explorer ? (
+                <a
+                  href={`${net.explorer}/tx/${tx}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="max-w-full break-all font-mono text-[9.5px] leading-relaxed text-steel underline decoration-dotted underline-offset-2 hover:text-live"
+                >
+                  {tx}
+                </a>
+              ) : (
+                <p className="max-w-full break-all font-mono text-[9.5px] leading-relaxed text-steel">{tx}</p>
+              )}
               <button
-                onClick={() => setAmount(String(wallet.usdtHuman))}
-                className="font-mono text-[10px] text-live hover:underline"
+                onClick={onClose}
+                className="mt-1 w-full rounded-[14px] bg-live py-3.5 font-mono text-[12px] uppercase tracking-[0.14em] text-void transition-all hover:brightness-105"
               >
-                max {usdt(wallet.usdtHuman)}
+                Done
               </button>
             </div>
-            <div className="flex items-center gap-2 rounded-default border border-edge-2 bg-panel-2 px-3 focus-within:border-edge-3">
-              <input
-                value={amount}
-                onChange={(e) => setAmount(e.target.value.replace(/[^0-9.]/g, ""))}
-                inputMode="decimal"
-                placeholder="0.00"
-                className="w-full bg-transparent py-2.5 font-display text-[18px] text-chalk placeholder:text-faint focus:outline-none"
-              />
-              <span className="font-mono text-[11px] text-steel">USD₮</span>
+          ) : (
+            <div className="relative flex flex-col gap-3.5 p-5">
+              {/* amount */}
+              <div className="rounded-[16px] border border-edge-2 bg-void/40 px-4 py-3.5">
+                <div className="flex items-center justify-between">
+                  <span className="label-mono text-faint">you send</span>
+                  <button
+                    onClick={() => onAmount(String(wallet.usdtHuman))}
+                    className="rounded-full bg-live/10 px-2.5 py-1 font-mono text-[9.5px] uppercase tracking-[0.1em] text-live transition-colors hover:bg-live/[0.16]"
+                  >
+                    Max · {usdt(wallet.usdtHuman)}
+                  </button>
+                </div>
+                <div className="mt-1.5 flex items-baseline gap-2">
+                  <input
+                    value={amount}
+                    onChange={(e) => onAmount(e.target.value)}
+                    inputMode="decimal"
+                    placeholder="0"
+                    autoFocus
+                    className="min-w-0 flex-1 bg-transparent font-display text-[34px] font-semibold leading-none tracking-tight text-chalk placeholder:text-faint focus:outline-none"
+                  />
+                  <span className="font-mono text-[13px] text-steel">USD₮</span>
+                </div>
+              </div>
+
+              {/* recipient — paste-first, since nobody types 42 hex chars */}
+              <div className="flex items-center gap-2 rounded-[14px] border border-edge-2 bg-void/40 pl-4 pr-2 focus-within:border-live/40">
+                <input
+                  value={to}
+                  onChange={(e) => {
+                    setTo(e.target.value);
+                    setErr(null);
+                  }}
+                  placeholder="Recipient · 0x…"
+                  spellCheck={false}
+                  className="min-w-0 flex-1 truncate bg-transparent py-3 font-mono text-[12px] text-chalk placeholder:text-faint focus:outline-none"
+                />
+                <button
+                  onClick={paste}
+                  className="flex shrink-0 items-center gap-1.5 rounded-[10px] bg-white/[0.06] px-2.5 py-1.5 font-mono text-[10px] uppercase tracking-[0.1em] text-chalk transition-colors hover:bg-white/[0.12]"
+                >
+                  <ClipboardPaste size={12} /> Paste
+                </button>
+              </div>
+
+              {err && <p className="font-mono text-[10.5px] leading-relaxed text-live/90">{err}</p>}
+
+              {/* CTA */}
+              <button
+                onClick={submit}
+                disabled={busy || !valid}
+                className="mt-0.5 flex w-full items-center justify-center gap-2 rounded-[14px] bg-live py-3.5 font-mono text-[12.5px] uppercase tracking-[0.14em] text-void transition-all hover:brightness-105 disabled:pointer-events-none disabled:opacity-30"
+              >
+                {busy ? <Loader2 size={15} className="animate-spin" /> : <ArrowUpRight size={15} />}
+                {busy ? "Sending" : "Send"}
+              </button>
             </div>
-          </div>
-          {err && <p className="font-mono text-[11px] text-steel">{err}</p>}
-          <Button variant="solid" className="w-full" onClick={submit} disabled={busy || !valid}>
-            {busy ? <Loader2 size={13} className="animate-spin" /> : <ArrowUpRight size={13} />}
-            {busy ? "Sending…" : "Send USD₮"}
-          </Button>
-          <p className="text-center font-mono text-[9.5px] text-faint">Signed on-device by your WDK key · gas is on us</p>
+          )}
         </div>
-      )}
-    </ModalShell>
+      </motion.div>
+    </div>,
+    document.body,
   );
 }
 
 function ReceiveModal({ address, onClose }: { address: string; onClose: () => void }) {
+  const { health, walletNetwork } = useApp();
+  const net = resolveNetwork(health, walletNetwork);
   const [copied, setCopied] = useState(false);
   const copy = () => {
     navigator.clipboard?.writeText(address).then(() => {
@@ -267,10 +473,16 @@ function ReceiveModal({ address, onClose }: { address: string; onClose: () => vo
         <p className="text-[13px] leading-relaxed text-silver">
           Share your address to get paid in USD₮. Funds land straight in your self-custodial wallet.
         </p>
-        <div className="break-all rounded-default border border-edge-2 bg-panel-2 px-3 py-3 font-mono text-[12px] leading-relaxed text-chalk">
+        {net && (
+          <div className="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.12em] text-steel">
+            <span className={`h-1.5 w-1.5 rounded-full ${net.kind === "mainnet" ? "bg-live shadow-[0_0_8px_var(--color-live)]" : net.kind === "testnet" ? "bg-chalk" : "bg-steel"}`} />
+            Send only on <span className="text-chalk">{net.label}</span>
+          </div>
+        )}
+        <div className="break-all rounded-[12px] border border-edge-2 bg-panel-2 px-3 py-3 font-mono text-[12px] leading-relaxed text-chalk">
           {address}
         </div>
-        <Button variant="solid" className="w-full" onClick={copy}>
+        <Button variant="solid" className="w-full rounded-[12px]" onClick={copy}>
           {copied ? <Check size={13} /> : <Copy size={13} />} {copied ? "Copied" : "Copy address"}
         </Button>
       </div>
@@ -375,41 +587,53 @@ function ModuleTile({ m, i }: { m: Module; i: number }) {
   const soon = m.tag === "SOON";
   const inner = (
     <div
-      className={`group relative flex h-full flex-col gap-3 rounded-lg border p-5 transition-all ${
+      className={`group relative flex h-full flex-col overflow-hidden rounded-lg border p-5 transition-all duration-300 ${
         soon
           ? "border-edge bg-panel/30"
-          : "border-edge-2 bg-panel/60 hover:-translate-y-0.5 hover:border-edge-3 hover:bg-panel"
+          : "border-edge-2 bg-panel/60 hover:-translate-y-0.5 hover:border-live/30 hover:bg-panel"
       }`}
     >
-      <div className="flex items-start justify-between">
+      {/* green shade on hover — the inspo glow */}
+      {!soon && (
         <div
-          className={`grid h-10 w-10 place-items-center rounded-default border ${
-            soon ? "border-edge text-steel" : "border-edge-2 text-chalk"
-          }`}
-        >
-          <m.icon size={18} />
-        </div>
-        <TagPill tag={m.tag} />
-      </div>
-      <div>
-        <div className="flex items-center gap-1.5">
-          <span className="font-display text-[19px] font-semibold text-chalk">{m.name}</span>
-          {!soon && (
-            <ArrowUpRight size={15} className="text-steel transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5 group-hover:text-chalk" />
-          )}
-        </div>
-        <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-faint">{m.tagline}</div>
-      </div>
-      <p className="text-[13px] leading-relaxed text-steel">{m.desc}</p>
-      <div className="mt-auto flex items-center gap-1.5 pt-1">
-        {m.tracks.map((t) => (
-          <span
-            key={t}
-            className="rounded-chip border border-edge-2 px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-[0.14em] text-steel"
+          className="pointer-events-none absolute inset-0 opacity-0 transition-opacity duration-300 group-hover:opacity-100"
+          style={{
+            backgroundImage:
+              "radial-gradient(120% 92% at 50% 0%, color-mix(in srgb, var(--color-live) 14%, transparent), transparent 62%)",
+          }}
+        />
+      )}
+      <div className="relative flex flex-1 flex-col gap-3">
+        <div className="flex items-start justify-between">
+          <div
+            className={`grid h-10 w-10 place-items-center rounded-lg border transition-colors ${
+              soon ? "border-edge text-steel" : "border-edge-2 text-chalk group-hover:border-live/40 group-hover:text-live"
+            }`}
           >
-            {t}
-          </span>
-        ))}
+            <m.icon size={18} />
+          </div>
+          <TagPill tag={m.tag} />
+        </div>
+        <div>
+          <div className="flex items-center gap-1.5">
+            <span className="font-display text-[19px] font-semibold text-chalk">{m.name}</span>
+            {!soon && (
+              <ArrowUpRight size={15} className="text-steel transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5 group-hover:text-chalk" />
+            )}
+          </div>
+          <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-faint">{m.tagline}</div>
+        </div>
+        <p className="text-[13px] leading-relaxed text-steel">{m.desc}</p>
+        <div className="mt-auto flex items-center gap-1.5 pt-1">
+          {m.tracks.map((t) => (
+            <span
+              key={t}
+              className="rounded-chip border border-edge-2 px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-[0.14em] text-steel"
+            >
+              {t}
+            </span>
+          ))}
+        </div>
       </div>
     </div>
   );
@@ -448,16 +672,29 @@ export default function Hub() {
 
   return (
     <main className="mx-auto max-w-[1180px] 2xl:max-w-[1440px] px-6 pb-24 pt-24">
-      <Reveal>
-        <Eyebrow className="mb-2">predikt · the football economy</Eyebrow>
-        <h1 className="max-w-2xl font-display text-[40px] font-semibold leading-[1.02] tracking-[-0.03em] text-chalk">
-          One wallet. <span className="text-gradient">Every way to play</span> the World Cup.
-        </h1>
-        <p className="mt-3 max-w-xl text-[15px] leading-relaxed text-silver">
-          Predict, organize, and play fantasy — all on one self-custodial USD₮ wallet. Real money in,
-          real money out. Your keys, your money, no custody.
-        </p>
-      </Reveal>
+      <div className="flex items-start justify-between gap-8">
+        <Reveal className="min-w-0 flex-1">
+          <Eyebrow className="mb-2">predikt · the football economy</Eyebrow>
+          <h1 className="max-w-2xl font-display text-[40px] font-semibold leading-[1.02] tracking-[-0.03em] text-chalk">
+            One wallet. <span className="text-gradient">Every way to play</span> the World Cup.
+          </h1>
+          <p className="mt-3 max-w-xl text-[15px] leading-relaxed text-silver">
+            Predict, organize, and play fantasy — all on one self-custodial USD₮ wallet. Real money in,
+            real money out. Your keys, your money, no custody.
+          </p>
+        </Reveal>
+        {/* the football: a rotating point-cloud ball, with a faint green halo */}
+        <div className="relative hidden h-[196px] w-[280px] shrink-0 lg:block" aria-hidden>
+          <div
+            className="pointer-events-none absolute inset-0"
+            style={{
+              backgroundImage:
+                "radial-gradient(52% 52% at 56% 44%, color-mix(in srgb, var(--color-live) 18%, transparent), transparent 70%)",
+            }}
+          />
+          <AsciiBall className="relative h-full w-full opacity-80" />
+        </div>
+      </div>
 
       <div className={`mt-9 grid gap-5 ${showAi ? "lg:grid-cols-2" : ""}`}>
         {account ? (

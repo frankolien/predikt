@@ -116,17 +116,39 @@ export interface NetworkInfo {
   chainId: number;
   explorer: string; // block-explorer base, or "" when none (local)
   faucet: boolean;
+  /** Can the wallet switch to this network? (boot net, or a net with a known USD₮.) */
+  available?: boolean;
 }
 
 export interface Health {
   ok: boolean;
   mode: string;
-  network?: NetworkInfo;
+  network?: NetworkInfo; // the boot/default network (the pool engine runs here)
+  networks?: NetworkInfo[]; // every network the wallet can switch to (Solflare-style)
   chainReady: boolean;
   walletBackend: string;
   ai: AiStatus;
   usdt: string | null;
   operator: string | null;
+}
+
+/**
+ * The wallet's ACTIVE network — the user's switch selection resolved against the
+ * server's advertised networks, falling back to the boot network. One source of
+ * truth for the switcher + the send/receive views.
+ */
+export function resolveNetwork(health: Health | null, walletNetwork: string | null): NetworkInfo | null {
+  if (!health) return null;
+  const list = health.networks ?? (health.network ? [health.network] : []);
+  const boot = health.network ?? list[0] ?? null;
+  if (walletNetwork) {
+    // Only honour a selection the server still offers — a net that became
+    // unavailable (e.g. across a redeploy) would make the badge lie about the
+    // balance, since the server falls back to boot for unavailable networks.
+    const sel = list.find((n) => n.key === walletNetwork);
+    if (sel && sel.available !== false) return sel;
+  }
+  return boot;
 }
 
 // ---- free-to-play accounts + points pools ----
@@ -349,9 +371,35 @@ export function setToken(token: string | null): void {
   if (token) localStorage.setItem(TOKEN_KEY, token);
   else localStorage.removeItem(TOKEN_KEY);
 }
+
+// ---- wallet network (Solflare-style switch) ----
+// Which chain the money layer (balance / send) operates on. null ⇒ the server's
+// boot/default network. Persisted so the choice survives reloads, and sent as a
+// header on every call (the server only honours it on the money endpoints).
+const WALLET_NET_KEY = "gaffer-wallet-net";
+export function getWalletNetwork(): string | null {
+  try {
+    return localStorage.getItem(WALLET_NET_KEY);
+  } catch {
+    return null;
+  }
+}
+export function setWalletNetwork(key: string | null): void {
+  try {
+    if (key) localStorage.setItem(WALLET_NET_KEY, key);
+    else localStorage.removeItem(WALLET_NET_KEY);
+  } catch {
+    /* storage blocked — the header just defaults to the boot network */
+  }
+}
+
 function authHeaders(): Record<string, string> {
   const t = getToken();
-  return t ? { Authorization: `Bearer ${t}` } : {};
+  const net = getWalletNetwork();
+  return {
+    ...(t ? { Authorization: `Bearer ${t}` } : {}),
+    ...(net ? { "X-Gaffer-Network": net } : {}),
+  };
 }
 
 async function get<T>(path: string): Promise<T> {
@@ -414,7 +462,10 @@ export const api = {
     me: () => get<{ account: Account }>("/account"),
     rename: (handle: string) => post<{ account: Account }>("/account/handle", { handle }),
     // self-custodial USD₮ wallet (WDK) linked to the account
-    wallet: () => get<{ address: string | null; usdtHuman: number; backend?: string }>("/account/wallet"),
+    wallet: () =>
+      get<{ address: string | null; usdtHuman: number; backend?: string; network?: string; tokenAvailable?: boolean }>(
+        "/account/wallet",
+      ),
     connectWallet: () =>
       post<{ address: string; usdtHuman: number; backend: string; mnemonic?: string }>("/account/wallet"),
     // send USD₮ to any address from your self-custodial wallet

@@ -18,6 +18,9 @@ export interface AppCtx {
   setWallet: (w: Wallet | null) => void;
   refreshBalance: () => void;
   connectWallet: () => Promise<Wallet>;
+  // wallet network switch (Solflare-style). null ⇒ the server's boot network.
+  walletNetwork: string | null;
+  switchWalletNetwork: (key: string | null) => Promise<void>;
 }
 
 export const AppContext = createContext<AppCtx>(null!);

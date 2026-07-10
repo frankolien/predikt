@@ -8,6 +8,7 @@ import { usdt, shortAddr } from "../lib/format";
 import { cn } from "../lib/cn";
 import { Pill, LiveDot, Avatar } from "./ui";
 import { Wordmark } from "./Logo";
+import { NetworkSwitcher } from "./NetworkSwitcher";
 
 const LINKS: { to: string; label: string; icon: LucideIcon }[] = [
   { to: "/app", label: "Hub", icon: LayoutGrid },
@@ -78,28 +79,9 @@ function label(model: string) {
   return model.replace(/_/g, " ").replace(/ INST.*$/i, "").trim().slice(0, 14);
 }
 
-/** Which chain we're on: DEMO (local) · TESTNET · LIVE (mainnet). */
-function NetworkBadge({ network }: { network?: NetworkInfo }) {
-  if (!network) return null;
-  const tag = network.kind === "mainnet" ? "LIVE" : network.kind === "testnet" ? "TESTNET" : "DEMO";
-  const tone =
-    network.kind === "mainnet"
-      ? "border-live/40 text-live"
-      : network.kind === "testnet"
-        ? "border-edge-3 text-chalk"
-        : "border-edge-2 text-steel";
-  const dot = network.kind === "mainnet" ? "bg-live" : network.kind === "testnet" ? "bg-chalk" : "bg-steel";
-  return (
-    <span
-      title={`${network.label} · chain ${network.chainId}`}
-      className={cn("flex items-center gap-1.5 rounded-chip border px-2 py-1 font-mono text-[10px] uppercase tracking-[0.12em]", tone)}
-    >
-      <span className={cn("h-1.5 w-1.5 rounded-full", dot)} />
-      <span className="hidden md:inline">{network.label} · </span>
-      {tag}
-    </span>
-  );
-}
+// Which chain the wallet is on (DEMO · TESTNET · LIVE) is now an interactive
+// control — see <NetworkSwitcher>, which reads the active network from context
+// and lets the user switch (with a real-money gate for mainnet).
 
 /** Your self-custodial USD₮ balance + a click-to-copy address. */
 function WalletChip({ wallet }: { wallet: Wallet }) {
@@ -280,14 +262,12 @@ function AccountMenu({ account, dropUp = false }: { account: Account; dropUp?: b
 function ProfileMenu({
   account,
   wallet,
-  network,
   ai,
   theme,
   onToggleTheme,
 }: {
   account: Account;
   wallet?: Wallet | null;
-  network?: NetworkInfo;
   ai?: AiStatus;
   theme?: Theme;
   onToggleTheme?: () => void;
@@ -414,8 +394,8 @@ function ProfileMenu({
               {/* profile detail — wallet, chain, on-device AI */}
               <div className="mt-3 flex flex-col gap-2 border-t border-edge pt-3">
                 {wallet && <WalletChip wallet={wallet} />}
+                <NetworkSwitcher inline />
                 <div className="flex flex-wrap items-center gap-2">
-                  <NetworkBadge network={network} />
                   <AiPill ai={ai} />
                 </div>
               </div>
@@ -489,7 +469,7 @@ function SidebarAi({ ai }: { ai?: AiStatus }) {
   );
 }
 
-export function DesktopSidebar({ ai, account, wallet, network, theme, onToggleTheme }: NavProps) {
+export function DesktopSidebar({ ai, account, wallet, theme, onToggleTheme }: NavProps) {
   return (
     <aside className="fixed inset-y-0 left-0 z-50 flex w-64 flex-col border-r border-edge bg-void/70 backdrop-blur-xl">
       {/* brand — a drag region that also clears the macOS traffic lights (overlay title bar) */}
@@ -530,7 +510,7 @@ export function DesktopSidebar({ ai, account, wallet, network, theme, onToggleTh
 
       <div className="border-t border-edge p-3">
         {account ? (
-          <ProfileMenu account={account} wallet={wallet} network={network} ai={ai} theme={theme} onToggleTheme={onToggleTheme} />
+          <ProfileMenu account={account} wallet={wallet} ai={ai} theme={theme} onToggleTheme={onToggleTheme} />
         ) : (
           <Pill>
             <User size={11} /> guest
@@ -541,7 +521,7 @@ export function DesktopSidebar({ ai, account, wallet, network, theme, onToggleTh
   );
 }
 
-export function Nav({ ai, account, wallet, network, theme, onToggleTheme }: NavProps) {
+export function Nav({ ai, account, wallet, theme, onToggleTheme }: NavProps) {
   return (
     <>
     <header className="fixed inset-x-0 top-0 z-50 border-b border-edge bg-void/80 backdrop-blur-md">
@@ -558,7 +538,7 @@ export function Nav({ ai, account, wallet, network, theme, onToggleTheme }: NavP
         </div>
         <div className="flex items-center gap-2.5">
           <AiPill ai={ai} />
-          <NetworkBadge network={network} />
+          <NetworkSwitcher />
           {wallet && <WalletChip wallet={wallet} />}
           {account ? (
             <AccountMenu account={account} />

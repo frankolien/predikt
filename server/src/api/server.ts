@@ -10,6 +10,14 @@ import { config } from '../config.js';
 import * as manager from '../pool/manager.js';
 import { transferUsdt } from '../wdk/wallet.js';
 import { usdt } from '../chain/client.js';
+import {
+  getContext,
+  listNetworks,
+  isNetworkAvailable,
+  isKnownNetwork,
+  BOOT_NETWORK_KEY,
+  type NetworkContext,
+} from '../chain/context.js';
 import { streamGafferRead, streamLiveReaction, streamAsk } from '../qvac/service.js';
 import { status as aiStatus, ensureLoaded } from '../qvac/engine.js';
 import * as voice from '../qvac/voice.js';
@@ -21,6 +29,20 @@ import * as organize from '../organize/store.js';
 import { streamDirector, type DirectorKind } from '../organize/ai.js';
 import * as fantasy from '../fantasy/store.js';
 import { streamFantasyAI, type FantasyAiKind } from '../fantasy/ai.js';
+
+/**
+ * Human-readable send failures. On a switched-to network (e.g. mainnet) the fan's
+ * wallet is real and unfunded by us — the honest, common failure is "no ETH for
+ * gas". Surface that plainly instead of a raw revert string.
+ */
+function friendlySendError(err: Error, networkLabel: string): string {
+  const msg = err.message || '';
+  if (/insufficient funds|gas required exceeds|exceeds the balance|intrinsic gas/i.test(msg)) {
+    return `Your wallet needs ETH for gas on ${networkLabel} to send. Fund this address with a little ETH and try again.`;
+  }
+  if (/nonce/i.test(msg)) return 'A previous transfer is still settling — try again in a moment.';
+  return msg || 'Transfer failed — try again.';
+}
 
 export function buildApp() {
   const app = Fastify({ logger: false, bodyLimit: 20 * 1024 * 1024 });
@@ -41,6 +63,29 @@ export function buildApp() {
     const token = bearer ?? (req.headers['x-gaffer-token'] as string | undefined);
     return accounts.accountFromToken(token);
   };
+
+  /**
+   * The network the caller's WALLET is on — the Solflare-style switch. Read from
+   * the `x-gaffer-network` header; defaults to (and falls back to) the boot
+   * network so money ops never target an unknown or unreachable chain. Returns
+   * the network context + the USD₮ token to read/spend on it (the boot chain's
+   * token may only be known at runtime, so it comes from the manager there).
+   */
+  const walletCtx = (req: { headers: Record<string, unknown> }): { key: string; ctx: NetworkContext; token: Address | null } => {
+    const raw = req.headers['x-gaffer-network'];
+    const asked = (typeof raw === 'string' ? raw : Array.isArray(raw) ? raw[0] : '')?.trim();
+    const key = asked && isKnownNetwork(asked) && isNetworkAvailable(asked) ? asked : BOOT_NETWORK_KEY;
+    const ctx = getContext(key);
+    const token =
+      key === BOOT_NETWORK_KEY
+        ? manager.isReady()
+          ? (manager.usdtToken() as Address)
+          : null
+        : ctx.usdtAddress ?? null;
+    return { key, ctx, token };
+  };
+  const balanceOnNet = (address: string, key: string, ctx: NetworkContext) =>
+    key === BOOT_NETWORK_KEY ? wallets.balanceOf(address) : wallets.balanceOfOn(address, ctx);
 
   app.post('/api/account', async (req) => {
     const { handle } = (req.body ?? {}) as { handle?: string };
@@ -106,7 +151,18 @@ export function buildApp() {
   app.get('/api/account/wallet', async (req, reply) => {
     const a = await authed(req);
     if (!a) return reply.code(401).send({ error: 'sign in first' });
-    return (await wallets.getWallet(a.id)) ?? { address: null, usdtHuman: 0 };
+    const addr = await wallets.walletAddressOf(a.id);
+    if (!addr) return { address: null, usdtHuman: 0 };
+    // Read the balance on the caller's SELECTED network (same address, its token).
+    const { key, ctx, token } = walletCtx(req);
+    const usdtHuman = await balanceOnNet(addr, key, ctx);
+    return {
+      address: addr,
+      usdtHuman,
+      backend: manager.walletBackend(),
+      network: key,
+      tokenAvailable: !!token,
+    };
   });
 
   // Send USD₮ from your self-custodial wallet to any address. Gas is refuelled
@@ -122,19 +178,22 @@ export function buildApp() {
     const from = await wallets.walletAddressOf(a.id);
     if (!from) return reply.code(400).send({ error: 'Connect your USD₮ wallet first.' });
     if (to.toLowerCase() === from.toLowerCase()) return reply.code(400).send({ error: "That's your own address." });
-    const balance = await wallets.balanceOf(from);
+    // Send on the caller's SELECTED network (same self-custodial key, its token).
+    const { key, ctx, token } = walletCtx(req);
+    if (!token) return reply.code(400).send({ error: `USD₮ isn't available on ${ctx.network.label} yet.` });
+    const balance = await balanceOnNet(from, key, ctx);
     if (amount > balance) return reply.code(400).send({ error: `Not enough USD₮ — your balance is ${balance}.` });
     try {
-      await manager.topUpIfLow(from as Address); // fan wallets hold no ETH — refuel gas first
-      const { txHash } = await transferUsdt({
-        from: from as Address,
-        token: manager.usdtToken(),
-        to: to as Address,
-        amount: usdt(amount),
-      });
-      return { txHash, usdtHuman: await wallets.balanceOf(from) };
+      // Faucet only exists on the boot chain — a switched-to network is a real
+      // wallet the user funds themselves (no minting / gas top-up off-chain).
+      if (key === BOOT_NETWORK_KEY) await manager.topUpIfLow(from as Address);
+      const { txHash } = await transferUsdt(
+        { from: from as Address, token, to: to as Address, amount: usdt(amount) },
+        ctx,
+      );
+      return { txHash, usdtHuman: await balanceOnNet(from, key, ctx), network: key };
     } catch (err) {
-      return reply.code(500).send({ error: (err as Error).message });
+      return reply.code(500).send({ error: friendlySendError(err as Error, ctx.network.label) });
     }
   });
 
@@ -498,6 +557,8 @@ export function buildApp() {
       explorer: config.network.explorer,
       faucet: config.network.faucet,
     },
+    // Every network the wallet can switch to (Solflare-style), boot network first.
+    networks: listNetworks(),
     chainReady: manager.isReady(),
     walletBackend: manager.isReady() ? manager.walletBackend() : 'initialising',
     ai: aiStatus(),

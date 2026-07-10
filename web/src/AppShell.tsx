@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Outlet } from "react-router-dom";
-import { api, aiStatusLocal, streamFixtures, getToken, setToken, type Account, type Health, type Wallet, type WalletAuth } from "./lib/api";
+import { api, aiStatusLocal, streamFixtures, getToken, setToken, getWalletNetwork, setWalletNetwork, type Account, type Health, type Wallet, type WalletAuth } from "./lib/api";
 import { ensureNotifyPermission, notify, notifyAvailable } from "./lib/notify";
 import { AppContext } from "./context";
 import { useTheme } from "./lib/theme";
@@ -21,6 +21,7 @@ export function AppShell() {
   const [wallet, setWallet] = useState<Wallet | null>(null);
   const [locked, setLocked] = useState(false);
   const [showOnboard, setShowOnboard] = useState(false);
+  const [walletNetwork, setWalletNetworkState] = useState<string | null>(() => getWalletNetwork());
   const { theme, toggle } = useTheme();
 
   useEffect(() => {
@@ -164,6 +165,25 @@ export function AppShell() {
       .catch(() => {});
   }, []);
 
+  // Switch the wallet's active network (Solflare-style). Persist the choice (it
+  // becomes an X-Gaffer-Network header on every call), then re-read the balance
+  // on the new chain — same self-custodial address, a different USD₮ token.
+  const switchWalletNetwork = useCallback(async (key: string | null) => {
+    setWalletNetwork(key);
+    setWalletNetworkState(key);
+    try {
+      const w = await api.account.wallet();
+      if (w.address)
+        setWallet((cur) =>
+          cur
+            ? { ...cur, usdtHuman: w.usdtHuman }
+            : { address: w.address!, displayName: "You", mnemonic: "", backend: w.backend ?? "wdk", usdtHuman: w.usdtHuman },
+        );
+    } catch {
+      /* balance read failed on the new chain — the badge still reflects the switch */
+    }
+  }, []);
+
   // A fresh account's demo USD₮ mints on-chain in the background — poll the
   // balance a few times so it lands in the UI without a manual refresh.
   const pollFunding = useCallback(() => {
@@ -226,7 +246,7 @@ export function AppShell() {
 
   return (
     <AppContext.Provider
-      value={{ health, account, commitAuth, restoreAccount, signIn, signOut, refreshAccount, wallet, setWallet, refreshBalance, connectWallet }}
+      value={{ health, account, commitAuth, restoreAccount, signIn, signOut, refreshAccount, wallet, setWallet, refreshBalance, connectWallet, walletNetwork, switchWalletNetwork }}
     >
       <ToastProvider>
         {isDesktop ? (

@@ -19,12 +19,27 @@ import {
   createWalletClient,
   http,
   type Address,
+  type Chain,
   type Hex,
+  type PublicClient,
 } from 'viem';
 import { generateMnemonic, english, mnemonicToAccount } from 'viem/accounts';
 import { config } from '../config.js';
 import { chain, publicClient } from '../chain/client.js';
 import * as artifacts from '../chain/artifacts.js';
+
+/**
+ * The chain a wallet op runs on. Defaults to the boot chain (`bootCtx` below), so
+ * every existing pool/escrow caller is unchanged; the money card passes a
+ * different context when the user switches networks (balance/send on another
+ * chain — the same self-custodial address, a different RPC + USD₮ token).
+ */
+export interface ChainCtx {
+  rpcUrl: string;
+  chain: Chain;
+  publicClient: PublicClient;
+}
+const bootCtx: ChainCtx = { rpcUrl: config.rpcUrl, chain, publicClient };
 
 export type WalletBackend = 'wdk' | 'viem';
 
@@ -59,9 +74,11 @@ export function currentBackend(): WalletBackend {
   return backend;
 }
 
-/** Build a WDK account object for a stored fan (rebuilt on demand; cheap). */
-function wdkAccount(mnemonic: string) {
-  return new WalletAccountEvm(mnemonic, "0'/0/0", { provider: config.rpcUrl });
+/** Build a WDK account object for a stored fan (rebuilt on demand; cheap). The
+ *  provider RPC picks the chain — the boot chain by default, or the switched-to
+ *  network when the money card passes its context. */
+function wdkAccount(mnemonic: string, rpcUrl: string = config.rpcUrl) {
+  return new WalletAccountEvm(mnemonic, "0'/0/0", { provider: rpcUrl });
 }
 
 async function deriveAddress(mnemonic: string): Promise<Address> {
@@ -126,14 +143,16 @@ export function listFans(): Array<{ address: Address; displayName: string }> {
   return [...fans.values()].map(({ address, displayName }) => ({ address, displayName }));
 }
 
-/** USDt balance of a fan (base units). Uses WDK's getTokenBalance when available. */
-export async function tokenBalance(address: Address, token: Address): Promise<bigint> {
+/** USDt balance of a fan (base units), on `ctx`'s chain (boot chain by default).
+ *  Uses WDK's getTokenBalance when the fan's key is in session, else a public read
+ *  (works for any address across restarts). */
+export async function tokenBalance(address: Address, token: Address, ctx: ChainCtx = bootCtx): Promise<bigint> {
   await ensureBackend();
   const fan = getFan(address);
   if (backend === 'wdk' && fan) {
-    return (await wdkAccount(fan.mnemonic).getTokenBalance(token)) as bigint;
+    return (await wdkAccount(fan.mnemonic, ctx.rpcUrl).getTokenBalance(token)) as bigint;
   }
-  return publicClient.readContract({
+  return ctx.publicClient.readContract({
     address: token,
     abi: artifacts.MockUSDT.abi,
     functionName: 'balanceOf',
@@ -215,12 +234,15 @@ export async function joinPool(params: {
  * the fan's own key). This is the deposit leg of the generic escrow used by
  * pools, cups and leagues: the fan pays their buy-in into the treasury.
  */
-export async function transferUsdt(params: {
-  from: Address;
-  token: Address;
-  to: Address;
-  amount: bigint;
-}): Promise<{ txHash: Hex; backend: WalletBackend }> {
+export async function transferUsdt(
+  params: {
+    from: Address;
+    token: Address;
+    to: Address;
+    amount: bigint;
+  },
+  ctx: ChainCtx = bootCtx,
+): Promise<{ txHash: Hex; backend: WalletBackend }> {
   await ensureBackend();
   const fan = getFan(params.from);
   if (!fan) throw new Error(`Unknown fan wallet: ${params.from}`);
@@ -231,17 +253,17 @@ export async function transferUsdt(params: {
   });
 
   if (backend === 'wdk') {
-    const acc = wdkAccount(fan.mnemonic);
-    const nonce = await publicClient.getTransactionCount({ address: params.from, blockTag: 'pending' });
+    const acc = wdkAccount(fan.mnemonic, ctx.rpcUrl);
+    const nonce = await ctx.publicClient.getTransactionCount({ address: params.from, blockTag: 'pending' });
     const res = await acc.sendTransaction({ to: params.token, value: 0n, data, nonce });
     const txHash = (res?.hash ?? res) as Hex;
-    await publicClient.waitForTransactionReceipt({ hash: txHash });
+    await ctx.publicClient.waitForTransactionReceipt({ hash: txHash });
     return { txHash, backend };
   }
 
   const account = mnemonicToAccount(fan.mnemonic, { addressIndex: 0 });
-  const wallet = createWalletClient({ account, chain, transport: http(config.rpcUrl) });
-  const txHash = await wallet.sendTransaction({ account, chain, to: params.token, value: 0n, data });
-  await publicClient.waitForTransactionReceipt({ hash: txHash });
+  const wallet = createWalletClient({ account, chain: ctx.chain, transport: http(ctx.rpcUrl) });
+  const txHash = await wallet.sendTransaction({ account, chain: ctx.chain, to: params.token, value: 0n, data });
+  await ctx.publicClient.waitForTransactionReceipt({ hash: txHash });
   return { txHash, backend };
 }
