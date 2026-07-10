@@ -103,6 +103,10 @@ export interface NetworkDescriptor {
   explorer: string;
   faucet: boolean;
   available: boolean;
+  /** USD₮ token on this network — the client needs it to build a transfer locally.
+   *  Public info. undefined for boot-local (runtime-deployed); the health route
+   *  patches that in from the manager. */
+  usdt?: string;
 }
 
 /** Every network the client can offer in the switcher, boot network first. */
@@ -120,6 +124,7 @@ export function listNetworks(): NetworkDescriptor[] {
       explorer: p.explorer,
       faucet: p.faucet,
       available: isNetworkAvailable(key),
+      usdt: usdtAddressFor(key),
     };
   });
 }

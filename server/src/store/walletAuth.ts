@@ -92,9 +92,55 @@ export async function createWalletAccount(handle?: string): Promise<WalletAuthRe
 }
 
 /**
+ * Client-side custody: register a brand-new account keyed to an address the CLIENT
+ * generated + proved ownership of (SIWE). The server never sees the seed. Gas +
+ * demo-USD₮ funding runs in the background (operator-driven, needs no user key).
+ */
+export async function registerByAddress(address: string, handle?: string): Promise<WalletAuthResult> {
+  const existing = await userByAddress(address);
+  if (existing) {
+    void manager.topUpIfLow(address as `0x${string}`).catch(() => {});
+    return {
+      account: { id: existing.id, handle: existing.handle, points: existing.points },
+      token: await issueSession(existing.id),
+      wallet: { address, backend: manager.walletBackend(), usdtHuman: await manager.walletBalance(address as `0x${string}`) },
+      isNew: false,
+    };
+  }
+  const account = await insertUser(address, handle);
+  void manager.fundWallet(address as `0x${string}`).catch((e) => console.warn(`[auth] fundWallet ${address} failed:`, (e as Error).message));
+  return {
+    account,
+    token: await issueSession(account.id),
+    wallet: { address, backend: manager.walletBackend(), usdtHuman: 0 },
+    isNew: true,
+  };
+}
+
+/**
+ * Client-side custody: resume (or adopt) the account for an address the client
+ * proved ownership of via SIWE. No seed is transmitted — the signature is proof.
+ */
+export async function resumeByAddress(address: string): Promise<WalletAuthResult> {
+  const existing = await userByAddress(address);
+  if (!existing) return registerByAddress(address); // unseen key → adopt as new account
+  void manager.topUpIfLow(address as `0x${string}`).catch(() => {});
+  return {
+    account: { id: existing.id, handle: existing.handle, points: existing.points },
+    token: await issueSession(existing.id),
+    wallet: { address, backend: manager.walletBackend(), usdtHuman: await manager.walletBalance(address as `0x${string}`) },
+    isNew: false,
+  };
+}
+
+/**
  * Sign in / recover from a recovery phrase. Derives the address, then resumes the
  * matching account — or adopts the wallet as a fresh account if it's unseen
  * (importing an external WDK wallet). Throws on an invalid phrase.
+ *
+ * NOTE (custody): this path RECEIVES the seed server-side (legacy). It is kept
+ * behind the client-custody flag as rollback only and is removed at M2 close —
+ * see docs/custody-plan.md.
  */
 export async function signInWithMnemonic(mnemonic: string, handle?: string): Promise<WalletAuthResult> {
   if (!wallet.isValidMnemonic(mnemonic)) {

@@ -10,6 +10,7 @@ import { WalletUnlock } from "./components/WalletUnlock";
 import { DesktopOnboarding } from "./components/DesktopOnboarding";
 import { hasVault, clearVault } from "./lib/vault";
 import { keychainAvailable, keychainGet, keychainDelete, SEED_KEY } from "./lib/keychain";
+import { CLIENT_CUSTODY, signInWallet, setSessionSeed } from "./lib/custody";
 
 // The desktop shell uses a left sidebar (native-app feel); the web uses the top
 // bar. Same as the checks in App.tsx / main.tsx.
@@ -111,6 +112,7 @@ export function AppShell() {
     setToken(null);
     clearVault();
     keychainDelete(SEED_KEY); // desktop: forget the seed from the OS keychain too
+    setSessionSeed(null); // drop the in-memory signing key
     setLocked(false);
     setAccount(null);
     setWallet(null);
@@ -216,10 +218,13 @@ export function AppShell() {
   );
 
   // Sign in / recover an existing account from its recovery phrase (single step).
+  // Client-custody: the phrase never leaves the device — we sign a challenge and
+  // keep the seed in session memory so this device can sign its own transactions.
   const restoreAccount = useCallback(
     async (mnemonic: string) => {
-      const r = await api.auth.restore(mnemonic);
+      const r = CLIENT_CUSTODY ? await signInWallet(mnemonic) : await api.auth.restore(mnemonic);
       commitAuth(r);
+      if (CLIENT_CUSTODY) setSessionSeed(mnemonic);
       return r.account;
     },
     [commitAuth],

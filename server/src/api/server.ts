@@ -5,11 +5,13 @@
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import fastifyStatic from '@fastify/static';
-import { isAddress, type Address } from 'viem';
+import { isAddress, isHex, type Address, type Hex } from 'viem';
 import { config } from '../config.js';
 import * as manager from '../pool/manager.js';
 import { transferUsdt } from '../wdk/wallet.js';
 import { usdt } from '../chain/client.js';
+import * as challenges from '../store/challenges.js';
+import { buildSiweMessage, verifySiwe } from '../auth/siwe.js';
 import {
   getContext,
   listNetworks,
@@ -117,6 +119,48 @@ export function buildApp() {
     }
   });
 
+  // ---- client-side custody auth (the seed NEVER reaches the server) ----
+  // The client generates + holds the key; it proves ownership by signing a SIWE
+  // (EIP-4361) challenge. See docs/custody-plan.md.
+
+  // 1. Ask for a login challenge. Returns the exact SIWE message to sign.
+  app.post('/api/auth/challenge', async (req, reply) => {
+    const { address } = (req.body ?? {}) as { address?: string };
+    if (!address || !isAddress(address)) return reply.code(400).send({ error: 'valid address required' });
+    const nonce = challenges.issueNonce(address);
+    return { message: buildSiweMessage(address as Address, nonce), nonce };
+  });
+
+  // 2a. Register a NEW account for an address the client just proved it owns.
+  app.post('/api/auth/register', async (req, reply) => {
+    const { message, signature, handle } = (req.body ?? {}) as { message?: string; signature?: string; handle?: string };
+    if (!message || !signature || !isHex(signature)) return reply.code(400).send({ error: 'message + signature required' });
+    const siwe = await verifySiwe(message, signature as Hex);
+    if (!siwe || !challenges.consumeNonce(siwe.nonce, siwe.address)) {
+      return reply.code(401).send({ error: 'signature or challenge invalid' });
+    }
+    try {
+      return await walletAuth.registerByAddress(siwe.address, handle);
+    } catch (err) {
+      return reply.code(500).send({ error: (err as Error).message });
+    }
+  });
+
+  // 2b. Sign in (resume/adopt) an address the client proved it owns.
+  app.post('/api/auth/verify', async (req, reply) => {
+    const { message, signature } = (req.body ?? {}) as { message?: string; signature?: string };
+    if (!message || !signature || !isHex(signature)) return reply.code(400).send({ error: 'message + signature required' });
+    const siwe = await verifySiwe(message, signature as Hex);
+    if (!siwe || !challenges.consumeNonce(siwe.nonce, siwe.address)) {
+      return reply.code(401).send({ error: 'signature or challenge invalid' });
+    }
+    try {
+      return await walletAuth.resumeByAddress(siwe.address);
+    } catch (err) {
+      return reply.code(500).send({ error: (err as Error).message });
+    }
+  });
+
   app.get('/api/account', async (req, reply) => {
     const a = await authed(req);
     if (!a) return reply.code(401).send({ error: 'not signed in' });
@@ -197,6 +241,59 @@ export function buildApp() {
     }
   });
 
+  // ---- client-side-custody transaction relay (server broadcasts, never signs) ----
+  // The client builds + signs its own tx locally; the server only supplies read-only
+  // chain data (prepare) and rebroadcasts the pre-signed raw tx (relay). It sees a
+  // signature, never a key. See docs/custody-plan.md §4.3.
+
+  // Read-only: the nonce/gas/fees/chainId the client needs to build a tx. On a
+  // faucet (boot) network we also refuel the sender's gas so it can pay.
+  app.post('/api/tx/prepare', async (req, reply) => {
+    const a = await authed(req);
+    if (!a) return reply.code(401).send({ error: 'sign in first' });
+    const b = (req.body ?? {}) as { from?: string; to?: string; data?: string; value?: string };
+    if (!isAddress(b.from ?? '') || !isAddress(b.to ?? '')) return reply.code(400).send({ error: 'from + to required' });
+    const { key, ctx } = walletCtx(req);
+    const from = b.from as Address;
+    const to = b.to as Address;
+    const data = b.data && isHex(b.data) ? (b.data as Hex) : undefined;
+    const value = b.value ? BigInt(b.value) : 0n;
+    try {
+      if (key === BOOT_NETWORK_KEY) await manager.topUpIfLow(from); // faucet nets only
+      const [nonce, fees, gas] = await Promise.all([
+        ctx.publicClient.getTransactionCount({ address: from, blockTag: 'pending' }),
+        ctx.publicClient.estimateFeesPerGas(),
+        ctx.publicClient.estimateGas({ account: from, to, data, value }).catch(() => 120_000n),
+      ]);
+      return {
+        chainId: ctx.chain.id,
+        nonce,
+        gas: gas.toString(),
+        maxFeePerGas: fees.maxFeePerGas.toString(),
+        maxPriorityFeePerGas: fees.maxPriorityFeePerGas.toString(),
+      };
+    } catch (err) {
+      return reply.code(500).send({ error: (err as Error).message });
+    }
+  });
+
+  // Rebroadcast a client-signed raw tx. The server cannot alter it (the signature
+  // covers to/value/data/nonce/chainId) nor produce one — it only forwards + reads.
+  app.post('/api/tx/relay', async (req, reply) => {
+    const a = await authed(req);
+    if (!a) return reply.code(401).send({ error: 'sign in first' });
+    const { rawTx } = (req.body ?? {}) as { rawTx?: string };
+    if (!rawTx || !isHex(rawTx)) return reply.code(400).send({ error: 'signed rawTx required' });
+    const { ctx } = walletCtx(req);
+    try {
+      const hash = await ctx.publicClient.sendRawTransaction({ serializedTransaction: rawTx as Hex });
+      await ctx.publicClient.waitForTransactionReceipt({ hash });
+      return { hash };
+    } catch (err) {
+      return reply.code(500).send({ error: friendlySendError(err as Error, ctx.network.label) });
+    }
+  });
+
   app.post('/api/pools', async (req, reply) => {
     const a = await authed(req);
     if (!a) return reply.code(401).send({ error: 'sign in first' });
@@ -237,6 +334,7 @@ export function buildApp() {
       poolId?: string;
       code?: string;
       prediction?: { homeGoals?: number; awayGoals?: number };
+      depositTx?: string;
     };
     try {
       const pool = await store.joinPool({
@@ -245,6 +343,7 @@ export function buildApp() {
         userId: a.id,
         predHome: b.prediction?.homeGoals ?? 0,
         predAway: b.prediction?.awayGoals ?? 0,
+        depositTx: b.depositTx,
       });
       return { pool, account: await accounts.getAccount(a.id) };
     } catch (err) {
@@ -337,9 +436,9 @@ export function buildApp() {
   app.post('/api/tournaments/join', async (req, reply) => {
     const a = await authed(req);
     if (!a) return reply.code(401).send({ error: 'sign in first' });
-    const b = (req.body ?? {}) as { code?: string; tournamentId?: string };
+    const b = (req.body ?? {}) as { code?: string; tournamentId?: string; depositTx?: string };
     try {
-      return await organize.joinTournament({ code: b.code, tournamentId: b.tournamentId, userId: a.id });
+      return await organize.joinTournament({ code: b.code, tournamentId: b.tournamentId, userId: a.id, depositTx: b.depositTx });
     } catch (err) {
       return reply.code(400).send({ error: (err as Error).message });
     }
@@ -481,6 +580,7 @@ export function buildApp() {
       captainId?: string;
       viceId?: string;
       chip?: 'tc' | 'bb' | null;
+      depositTx?: string;
     };
     try {
       return await fantasy.joinLeague({
@@ -492,6 +592,7 @@ export function buildApp() {
         captainId: b.captainId ?? '',
         viceId: b.viceId ?? '',
         chip: b.chip ?? null,
+        depositTx: b.depositTx,
       });
     } catch (err) {
       return reply.code(400).send({ error: (err as Error).message });
@@ -558,7 +659,11 @@ export function buildApp() {
       faucet: config.network.faucet,
     },
     // Every network the wallet can switch to (Solflare-style), boot network first.
-    networks: listNetworks(),
+    // Patch the boot network's USD₮ token (runtime-known: local deploys it) so the
+    // client can build a transfer for whichever network is active.
+    networks: listNetworks().map((n) =>
+      n.key === BOOT_NETWORK_KEY && manager.isReady() ? { ...n, usdt: manager.usdtToken() } : n,
+    ),
     chainReady: manager.isReady(),
     walletBackend: manager.isReady() ? manager.walletBackend() : 'initialising',
     ai: aiStatus(),

@@ -35,6 +35,7 @@ import { useApp } from "../context";
 import { api, type AiStatus, aiLive, resolveNetwork, type NetworkInfo, type Wallet as WalletT } from "../lib/api";
 import { usdt, shortAddr } from "../lib/format";
 import { keychainAvailable, keychainGet, SEED_KEY } from "../lib/keychain";
+import { CLIENT_CUSTODY, getSessionSeed, setSessionSeed, sendUsdt } from "../lib/custody";
 
 /* ------------------------------------------------------------------ */
 /* Money spine — the self-custodial USD₮ wallet (WDK), plus play points */
@@ -251,25 +252,40 @@ function SendModal({ wallet, onClose, onSent }: { wallet: WalletT; onClose: () =
   const submit = async () => {
     setBusy(true);
     setErr(null);
-    const doSend = () => api.account.send(to.trim(), amt);
     try {
-      let r;
-      try {
-        r = await doSend();
-      } catch (e) {
-        // The server holds signing keys in memory only (self-custody) and loses
-        // them on restart/redeploy. If it can't find our wallet, re-arm it with
-        // the seed from the OS keychain, then retry once.
-        const msg = (e as Error).message || "";
-        if (/fan wallet|unknown wallet|sign in first/i.test(msg) && keychainAvailable) {
-          const seed = await keychainGet(SEED_KEY);
-          if (!seed) throw e;
-          await restoreAccount(seed);
+      if (CLIENT_CUSTODY) {
+        // Self-custody: sign the transfer on THIS device and relay the raw tx —
+        // the server never sees a key. Needs the active network's USD₮ token +
+        // the in-memory session seed (loaded on unlock/create/restore).
+        const token = net?.usdt;
+        if (!token) throw new Error(`USD₮ isn't available on ${net?.label ?? "this network"} yet.`);
+        let seed = getSessionSeed();
+        if (!seed && keychainAvailable) {
+          seed = await keychainGet(SEED_KEY); // desktop: re-load from the OS keychain
+          if (seed) setSessionSeed(seed);
+        }
+        if (!seed) throw new Error("Unlock your wallet to send.");
+        const { hash } = await sendUsdt(seed, token, to.trim(), amt);
+        setTx(hash);
+        onSent();
+      } else {
+        // Legacy server-signed path (with in-memory-key self-heal from the keychain).
+        const doSend = () => api.account.send(to.trim(), amt);
+        let r;
+        try {
           r = await doSend();
-        } else throw e;
+        } catch (e) {
+          const msg = (e as Error).message || "";
+          if (/fan wallet|unknown wallet|sign in first/i.test(msg) && keychainAvailable) {
+            const seed = await keychainGet(SEED_KEY);
+            if (!seed) throw e;
+            await restoreAccount(seed);
+            r = await doSend();
+          } else throw e;
+        }
+        setTx(r.txHash);
+        onSent();
       }
-      setTx(r.txHash);
-      onSent();
     } catch (e) {
       setErr(friendlySendError((e as Error).message, net));
     } finally {

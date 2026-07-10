@@ -118,6 +118,8 @@ export interface NetworkInfo {
   faucet: boolean;
   /** Can the wallet switch to this network? (boot net, or a net with a known USD₮.) */
   available?: boolean;
+  /** USD₮ token address on this network — the client builds transfers against it. */
+  usdt?: string;
 }
 
 export interface Health {
@@ -157,6 +159,15 @@ export interface Account {
   id: string;
   handle: string;
   points: number;
+}
+
+/** Read-only chain data from /api/tx/prepare — what the client needs to sign a tx. */
+export interface PreparedTxData {
+  chainId: number;
+  nonce: number;
+  gas: string;
+  maxFeePerGas: string;
+  maxPriorityFeePerGas: string;
 }
 
 /** Result of wallet-as-identity sign-in / sign-up. */
@@ -408,12 +419,18 @@ async function get<T>(path: string): Promise<T> {
   return r.json() as Promise<T>;
 }
 
-async function post<T>(path: string, body?: unknown): Promise<T> {
+async function post<T>(path: string, body?: unknown, netOverride?: string): Promise<T> {
   const r = await fetch(`${API_BASE}/api${path}`, {
     method: "POST",
     // Only declare a JSON content-type when we actually send a body — otherwise
-    // Fastify rejects the empty body (FST_ERR_CTP_EMPTY_JSON_BODY).
-    headers: { ...(body !== undefined ? { "Content-Type": "application/json" } : {}), ...authHeaders() },
+    // Fastify rejects the empty body (FST_ERR_CTP_EMPTY_JSON_BODY). netOverride
+    // pins a request to a specific network (buy-in deposits → the boot chain),
+    // winning over the switcher header in authHeaders().
+    headers: {
+      ...(body !== undefined ? { "Content-Type": "application/json" } : {}),
+      ...authHeaders(),
+      ...(netOverride ? { "X-Gaffer-Network": netOverride } : {}),
+    },
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
   if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `POST ${path} ${r.status}`);
@@ -450,10 +467,28 @@ export const api = {
   // ---- wallet-as-identity auth (self-custodial) ----
   auth: {
     // Create a brand-new wallet + account; recovery phrase returned once.
+    // LEGACY (server-generated seed) — kept for rollback; client-custody uses the
+    // challenge/register path below. See docs/custody-plan.md.
     newWallet: (handle?: string) => post<WalletAuth>("/auth/wallet/new", handle ? { handle } : {}),
-    // Sign in / recover an account from its BIP-39 recovery phrase.
+    // Sign in / recover an account from its BIP-39 recovery phrase (LEGACY — sends
+    // the seed to the server). Client-custody uses challenge → verify instead.
     restore: (mnemonic: string, handle?: string) =>
       post<WalletAuth>("/auth/wallet/restore", handle ? { mnemonic, handle } : { mnemonic }),
+
+    // ---- client-side custody (the seed NEVER leaves the device) ----
+    // 1. get the SIWE challenge to sign, 2a. register a new address, 2b. verify (sign in).
+    challenge: (address: string) => post<{ message: string; nonce: string }>("/auth/challenge", { address }),
+    register: (message: string, signature: string, handle?: string) =>
+      post<WalletAuth>("/auth/register", handle ? { message, signature, handle } : { message, signature }),
+    verify: (message: string, signature: string) => post<WalletAuth>("/auth/verify", { message, signature }),
+  },
+
+  // ---- client-side-custody tx relay (client signs; server broadcasts) ----
+  // `net` pins the request to a specific network (buy-in deposits → the boot chain).
+  tx: {
+    prepare: (from: string, to: string, data?: string, net?: string) =>
+      post<PreparedTxData>("/tx/prepare", data ? { from, to, data } : { from, to }, net),
+    relay: (rawTx: string, net?: string) => post<{ hash: string }>("/tx/relay", { rawTx }, net),
   },
 
   // ---- free-to-play accounts + points pools ----
@@ -477,7 +512,7 @@ export const api = {
       post<PointsPool>("/pools", { fixtureId, ...opts }),
     get: (id: string) => get<PointsPool>(`/pools/${id}`),
     byCode: (code: string) => get<PointsPool>(`/pools/code/${code.trim().toUpperCase()}`),
-    join: (args: { poolId?: string; code?: string; prediction: { homeGoals: number; awayGoals: number } }) =>
+    join: (args: { poolId?: string; code?: string; prediction: { homeGoals: number; awayGoals: number }; depositTx?: string }) =>
       post<{ pool: PointsPool; account: Account }>("/pools/join", args),
     updatePrediction: (id: string, prediction: { homeGoals: number; awayGoals: number }) =>
       post<{ pool: PointsPool }>(`/pools/${id}/prediction`, { prediction }),
@@ -498,7 +533,7 @@ export const api = {
     get: (id: string) => get<Tournament>(`/tournaments/${id}`),
     byCode: (code: string) => get<Tournament>(`/tournaments/code/${code.trim().toUpperCase()}`),
     mine: () => get<{ tournaments: Tournament[] }>("/me/tournaments"),
-    join: (args: { code?: string; tournamentId?: string }) => post<Tournament>("/tournaments/join", args),
+    join: (args: { code?: string; tournamentId?: string; depositTx?: string }) => post<Tournament>("/tournaments/join", args),
     addEntrant: (id: string, name: string) => post<Tournament>(`/tournaments/${id}/entrants`, { name }),
     start: (id: string, seeding?: "random" | "join") => post<Tournament>(`/tournaments/${id}/start`, { seeding }),
     report: (
@@ -527,6 +562,7 @@ export const api = {
       captainId: string;
       viceId: string;
       chip?: FantasyChip;
+      depositTx?: string;
     }) => post<FantasyLeague>("/fantasy/leagues/join", args),
     start: (id: string) => post<FantasyLeague>(`/fantasy/leagues/${id}/start`),
     settle: (id: string) => post<FantasyLeague>(`/fantasy/leagues/${id}/settle`),
