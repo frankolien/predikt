@@ -19,6 +19,10 @@ import {
   Copy,
   Check,
   X,
+  Signal,
+  Wifi,
+  BatteryFull,
+  Delete,
   ClipboardPaste,
 } from "lucide-react";
 import { Card, Eyebrow, Pill, LiveDot, Reveal, Button } from "../components/ui";
@@ -270,38 +274,51 @@ function SendModal({ wallet, onClose, onSent }: { wallet: WalletT; onClose: () =
     }
   };
 
-  // Sanitised amount entry — a real input field (desktop card): digits + one dot,
-  // max 2 decimals, no leading zero. The keyboard types straight in.
-  const onAmount = (raw: string) => {
+  // Keypad-driven amount entry — the mobile way.
+  const tap = (k: string) => {
     setErr(null);
-    let v = raw.replace(/[^0-9.]/g, "");
-    const dot = v.indexOf(".");
-    if (dot !== -1) {
-      const dec = v.slice(dot + 1).replace(/\./g, "").slice(0, 2);
-      v = v.slice(0, dot) + "." + dec;
-    }
-    v = v.replace(/^0(\d)/, "$1");
-    if (v.replace(".", "").length > 12) return;
-    setAmount(v);
+    if (k === "back") return setAmount((a) => a.slice(0, -1));
+    setAmount((a) => {
+      if (k === "." && a.includes(".")) return a;
+      if (k === "." && a === "") return "0.";
+      const next = a + k;
+      if (/\.\d{3,}$/.test(next)) return a; // cap at 2 decimals
+      if (next.replace(".", "").length > 10) return a;
+      return next.replace(/^0(\d)/, "$1"); // no "05"
+    });
   };
 
-  // Keyboard: Enter sends, Esc closes — the amount/recipient inputs type natively.
+  // Keyboard: type the amount, Enter to send, Esc to close — no mouse needed.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-      else if (e.key === "Enter" && valid && !busy) submit();
+      if (e.key === "Escape") return onClose();
+      if (e.key === "Enter") {
+        if (valid && !busy) submit();
+        return;
+      }
+      if (tx || document.activeElement instanceof HTMLInputElement) return; // let the address field type
+      if (/^[0-9]$/.test(e.key)) {
+        e.preventDefault();
+        tap(e.key);
+      } else if (e.key === ".") {
+        e.preventDefault();
+        tap(".");
+      } else if (e.key === "Backspace") {
+        e.preventDefault();
+        tap("back");
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [valid, busy]);
+  }, [valid, busy, tx, amount, to]);
 
   // Safety: restore text-selection if we unmount mid-drag.
   useEffect(() => () => void (document.body.style.userSelect = ""), []);
 
   return createPortal(
     // No scrim — the app behind stays fully normal and interactive (Solflare-style
-    // floating window). pointer-events pass through except on the card itself.
+    // floating window). pointer-events pass through except on the phone itself.
     <div ref={boundsRef} className="pointer-events-none fixed inset-0 z-[90] grid place-items-center px-6 py-6">
       <motion.div
         drag
@@ -310,146 +327,167 @@ function SendModal({ wallet, onClose, onSent }: { wallet: WalletT; onClose: () =
         dragConstraints={boundsRef}
         dragMomentum={false}
         dragElastic={0.06}
-        initial={{ opacity: 0, scale: 0.94 }}
+        initial={{ opacity: 0, scale: 0.92 }}
         animate={{ opacity: 1, scale: 1 }}
-        exit={{ opacity: 0, scale: 0.96 }}
-        transition={{ duration: 0.24, ease: [0.16, 1, 0.3, 1] }}
-        className="pointer-events-auto relative w-full max-w-[400px]"
+        exit={{ opacity: 0, scale: 0.95 }}
+        transition={{ duration: 0.26, ease: [0.16, 1, 0.3, 1] }}
+        className="pointer-events-auto relative w-full max-w-[350px]"
       >
-        {/* desktop wallet card — a floating window (Solflare-style), not a phone */}
-        <div className="relative overflow-hidden rounded-[24px] border border-edge-2 bg-panel shadow-[0_40px_120px_-24px_rgba(0,0,0,0.92)] ring-1 ring-white/[0.05]">
-          {/* soft green wash across the top */}
+        {/* phone shell */}
+        <div className="relative overflow-hidden rounded-[46px] border-[7px] border-[#15181a] bg-void shadow-[0_50px_140px_-24px_rgba(0,0,0,0.95)] ring-1 ring-white/[0.06]">
+          {/* notch */}
+          <div className="pointer-events-none absolute left-1/2 top-[9px] z-20 h-[24px] w-[108px] -translate-x-1/2 rounded-full bg-[#15181a]" />
+          {/* ambient green at the top of the screen */}
           <div
-            className="pointer-events-none absolute inset-x-0 top-0 h-28"
+            className="pointer-events-none absolute inset-x-0 top-0 h-44"
             style={{
               backgroundImage:
-                "radial-gradient(90% 100% at 50% 0%, color-mix(in srgb, var(--color-live) 11%, transparent), transparent 74%)",
+                "radial-gradient(80% 100% at 50% 0%, color-mix(in srgb, var(--color-live) 13%, transparent), transparent 72%)",
             }}
           />
 
-          {/* header — doubles as the drag handle (grab anywhere here to move it) */}
-          <div
-            onPointerDown={(e) => {
-              // Kill page text-selection for the duration of the drag.
-              document.body.style.userSelect = "none";
-              window.addEventListener("pointerup", () => (document.body.style.userSelect = ""), { once: true });
-              dragControls.start(e);
-            }}
-            className="relative flex cursor-grab touch-none select-none items-center justify-between gap-3 border-b border-edge/70 px-4 py-3 active:cursor-grabbing"
-          >
-            <div className="flex items-center gap-2.5">
-              <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-live/15 text-live ring-1 ring-live/25">
-                <ArrowUpRight size={16} />
-              </span>
-              <div className="leading-tight">
-                <div className="font-display text-[15px] font-semibold text-chalk">Send USD₮</div>
-                {net && (
-                  <div
-                    className={`mt-0.5 flex items-center gap-1 font-mono text-[9px] uppercase tracking-[0.14em] ${net.kind === "mainnet" ? "text-live" : "text-faint"}`}
-                  >
-                    <span className={`h-1 w-1 rounded-full ${net.kind === "mainnet" ? "bg-live" : "bg-steel"}`} />
-                    {net.label} · {netTag}
-                  </div>
-                )}
-              </div>
-            </div>
-            <button
-              onClick={onClose}
-              className="grid h-8 w-8 shrink-0 place-items-center rounded-full text-steel transition-colors hover:bg-white/[0.06] hover:text-chalk"
+          <div className="relative flex h-[min(668px,84vh)] flex-col">
+            {/* status bar — doubles as the drag handle (grab to move the window) */}
+            <div
+              onPointerDown={(e) => {
+                // Kill page text-selection for the duration of the drag.
+                document.body.style.userSelect = "none";
+                window.addEventListener("pointerup", () => (document.body.style.userSelect = ""), { once: true });
+                dragControls.start(e);
+              }}
+              className="flex cursor-grab touch-none select-none items-center justify-between px-8 pt-3.5 font-mono text-[12px] font-semibold text-chalk active:cursor-grabbing"
             >
-              <X size={16} />
-            </button>
-          </div>
-
-          {tx ? (
-            <div className="relative flex flex-col items-center gap-4 px-6 py-8 text-center">
-              <div className="grid h-16 w-16 place-items-center rounded-full bg-live/15 ring-1 ring-live/30">
-                <Check size={30} className="text-live" />
+              <span>9:41</span>
+              <div className="flex items-center gap-1.5">
+                <Signal size={14} />
+                <Wifi size={14} />
+                <BatteryFull size={18} />
               </div>
-              <div>
-                <div className="font-display text-[22px] font-semibold text-chalk">Sent</div>
-                <div className="mt-0.5 font-mono text-[13px] text-live">
-                  {amt} USD₮{net ? ` · ${net.label}` : ""}
-                </div>
-              </div>
-              {net?.explorer ? (
-                <a
-                  href={`${net.explorer}/tx/${tx}`}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="max-w-full break-all font-mono text-[9.5px] leading-relaxed text-steel underline decoration-dotted underline-offset-2 hover:text-live"
-                >
-                  {tx}
-                </a>
-              ) : (
-                <p className="max-w-full break-all font-mono text-[9.5px] leading-relaxed text-steel">{tx}</p>
-              )}
-              <button
-                onClick={onClose}
-                className="mt-1 w-full rounded-[14px] bg-live py-3.5 font-mono text-[12px] uppercase tracking-[0.14em] text-void transition-all hover:brightness-105"
-              >
-                Done
-              </button>
             </div>
-          ) : (
-            <div className="relative flex flex-col gap-3.5 p-5">
-              {/* amount */}
-              <div className="rounded-[16px] border border-edge-2 bg-void/40 px-4 py-3.5">
-                <div className="flex items-center justify-between">
-                  <span className="label-mono text-faint">you send</span>
+
+            {tx ? (
+              <div className="flex flex-1 flex-col items-center justify-center gap-4 px-8 text-center">
+                <div className="grid h-16 w-16 place-items-center rounded-full bg-live/15 ring-1 ring-live/30">
+                  <Check size={30} className="text-live" />
+                </div>
+                <div>
+                  <div className="font-display text-[22px] font-semibold text-chalk">Sent</div>
+                  <div className="mt-0.5 font-mono text-[13px] text-live">
+                    {amt} USD₮{net ? ` · ${net.label}` : ""}
+                  </div>
+                </div>
+                {net?.explorer ? (
+                  <a
+                    href={`${net.explorer}/tx/${tx}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="font-mono text-[9.5px] leading-relaxed text-steel break-all underline decoration-dotted underline-offset-2 hover:text-live"
+                  >
+                    {tx}
+                  </a>
+                ) : (
+                  <p className="font-mono text-[9.5px] leading-relaxed text-steel break-all">{tx}</p>
+                )}
+                <button
+                  onClick={onClose}
+                  className="mt-1 w-full rounded-[18px] bg-live py-4 font-mono text-[12px] uppercase tracking-[0.14em] text-void transition-all hover:brightness-105"
+                >
+                  Done
+                </button>
+              </div>
+            ) : (
+              <>
+                {/* header */}
+                <div className="flex items-center justify-between px-6 pt-3">
                   <button
-                    onClick={() => onAmount(String(wallet.usdtHuman))}
-                    className="rounded-full bg-live/10 px-2.5 py-1 font-mono text-[9.5px] uppercase tracking-[0.1em] text-live transition-colors hover:bg-live/[0.16]"
+                    onClick={onClose}
+                    className="grid h-9 w-9 place-items-center rounded-full bg-white/[0.05] text-chalk transition-colors hover:bg-white/[0.09]"
+                  >
+                    <X size={16} />
+                  </button>
+                  <div className="flex flex-col items-center gap-0.5 leading-none">
+                    <span className="font-mono text-[10.5px] uppercase tracking-[0.18em] text-steel">Send USD₮</span>
+                    {net && (
+                      <span
+                        className={`flex items-center gap-1 font-mono text-[8.5px] uppercase tracking-[0.14em] ${net.kind === "mainnet" ? "text-live" : "text-faint"}`}
+                      >
+                        <span className={`h-1 w-1 rounded-full ${net.kind === "mainnet" ? "bg-live" : "bg-steel"}`} />
+                        {net.label} · {netTag}
+                      </span>
+                    )}
+                  </div>
+                  <span className="h-9 w-9" />
+                </div>
+
+                {/* amount */}
+                <div className="flex flex-1 flex-col items-center justify-center gap-1.5">
+                  <span className="label-mono text-faint">you send</span>
+                  <div className="flex items-baseline gap-2">
+                    <span
+                      className={`font-display text-[56px] font-semibold leading-none tracking-tight ${amount ? "text-chalk" : "text-faint"}`}
+                    >
+                      {amount || "0"}
+                    </span>
+                    <span className="font-mono text-[14px] text-steel">USD₮</span>
+                  </div>
+                  <button
+                    onClick={() => setAmount(String(wallet.usdtHuman))}
+                    className="mt-1 rounded-full bg-live/10 px-3 py-1 font-mono text-[10px] uppercase tracking-[0.1em] text-live transition-colors hover:bg-live/[0.16]"
                   >
                     Max · {usdt(wallet.usdtHuman)}
                   </button>
                 </div>
-                <div className="mt-1.5 flex items-baseline gap-2">
-                  <input
-                    value={amount}
-                    onChange={(e) => onAmount(e.target.value)}
-                    inputMode="decimal"
-                    placeholder="0"
-                    autoFocus
-                    className="min-w-0 flex-1 bg-transparent font-display text-[34px] font-semibold leading-none tracking-tight text-chalk placeholder:text-faint focus:outline-none"
-                  />
-                  <span className="font-mono text-[13px] text-steel">USD₮</span>
+
+                {/* recipient — paste-first, since nobody types 42 hex chars */}
+                <div className="px-6">
+                  <div className="flex items-center gap-2 rounded-[16px] border border-edge-2 bg-panel-2 pl-4 pr-2 focus-within:border-live/40">
+                    <input
+                      value={to}
+                      onChange={(e) => {
+                        setTo(e.target.value);
+                        setErr(null);
+                      }}
+                      placeholder="Recipient · 0x…"
+                      spellCheck={false}
+                      className="min-w-0 flex-1 truncate bg-transparent py-3.5 font-mono text-[12px] text-chalk placeholder:text-faint focus:outline-none"
+                    />
+                    <button
+                      onClick={paste}
+                      className="flex shrink-0 items-center gap-1.5 rounded-[10px] bg-white/[0.06] px-2.5 py-1.5 font-mono text-[10px] uppercase tracking-[0.1em] text-chalk transition-colors hover:bg-white/[0.12]"
+                    >
+                      <ClipboardPaste size={12} /> Paste
+                    </button>
+                  </div>
+                  {err && <p className="mt-2 text-center font-mono text-[10.5px] leading-relaxed text-live/90">{err}</p>}
                 </div>
-              </div>
 
-              {/* recipient — paste-first, since nobody types 42 hex chars */}
-              <div className="flex items-center gap-2 rounded-[14px] border border-edge-2 bg-void/40 pl-4 pr-2 focus-within:border-live/40">
-                <input
-                  value={to}
-                  onChange={(e) => {
-                    setTo(e.target.value);
-                    setErr(null);
-                  }}
-                  placeholder="Recipient · 0x…"
-                  spellCheck={false}
-                  className="min-w-0 flex-1 truncate bg-transparent py-3 font-mono text-[12px] text-chalk placeholder:text-faint focus:outline-none"
-                />
-                <button
-                  onClick={paste}
-                  className="flex shrink-0 items-center gap-1.5 rounded-[10px] bg-white/[0.06] px-2.5 py-1.5 font-mono text-[10px] uppercase tracking-[0.1em] text-chalk transition-colors hover:bg-white/[0.12]"
-                >
-                  <ClipboardPaste size={12} /> Paste
-                </button>
-              </div>
+                {/* keypad */}
+                <div className="mt-3 grid grid-cols-3 gap-1 px-6">
+                  {["1", "2", "3", "4", "5", "6", "7", "8", "9", ".", "0", "back"].map((k) => (
+                    <button
+                      key={k}
+                      onClick={() => tap(k)}
+                      className="grid h-[52px] place-items-center rounded-[14px] font-display text-[22px] text-chalk transition-colors hover:bg-white/[0.05] active:bg-white/[0.09]"
+                    >
+                      {k === "back" ? <Delete size={20} className="text-steel" /> : k}
+                    </button>
+                  ))}
+                </div>
 
-              {err && <p className="font-mono text-[10.5px] leading-relaxed text-live/90">{err}</p>}
-
-              {/* CTA */}
-              <button
-                onClick={submit}
-                disabled={busy || !valid}
-                className="mt-0.5 flex w-full items-center justify-center gap-2 rounded-[14px] bg-live py-3.5 font-mono text-[12.5px] uppercase tracking-[0.14em] text-void transition-all hover:brightness-105 disabled:pointer-events-none disabled:opacity-30"
-              >
-                {busy ? <Loader2 size={15} className="animate-spin" /> : <ArrowUpRight size={15} />}
-                {busy ? "Sending" : "Send"}
-              </button>
-            </div>
-          )}
+                {/* CTA */}
+                <div className="px-6 pb-7 pt-3">
+                  <button
+                    onClick={submit}
+                    disabled={busy || !valid}
+                    className="flex w-full items-center justify-center gap-2 rounded-[20px] bg-live py-4 font-mono text-[12.5px] uppercase tracking-[0.14em] text-void transition-all hover:brightness-105 disabled:pointer-events-none disabled:opacity-30"
+                  >
+                    {busy ? <Loader2 size={15} className="animate-spin" /> : <ArrowUpRight size={15} />}
+                    {busy ? "Sending" : "Send"}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
         </div>
       </motion.div>
     </div>,
