@@ -8,7 +8,7 @@
  * the server used to see. See docs/custody-plan.md.
  */
 import { english, generateMnemonic, mnemonicToAccount } from "viem/accounts";
-import { encodeFunctionData, type Address, type Hex } from "viem";
+import { encodeFunctionData, toHex, type Address, type Hex } from "viem";
 
 /** A fresh 12-word BIP-39 recovery phrase, generated on-device. */
 export function newMnemonic(): string {
@@ -18,6 +18,17 @@ export function newMnemonic(): string {
 /** The wallet address for a phrase (same derivation as the server's WDK path). */
 export function addressFromMnemonic(mnemonic: string): Address {
   return mnemonicToAccount(mnemonic.trim(), { addressIndex: 0 }).address;
+}
+
+/**
+ * The raw private key for a phrase (m/44'/60'/0'/0/0). Used only by the local
+ * ERC-4337 signer (abstractionkit needs the key to sign a UserOperation) — it never
+ * leaves the device, exactly like the viem account above. See ./gasless.ts.
+ */
+export function privateKeyFromMnemonic(mnemonic: string): Hex {
+  const hd = mnemonicToAccount(mnemonic.trim(), { addressIndex: 0 }).getHdKey();
+  if (!hd.privateKey) throw new Error("could not derive a private key from this phrase");
+  return toHex(hd.privateKey);
 }
 
 /** Sign a login/registration challenge (EIP-191 / SIWE) with the local key. */

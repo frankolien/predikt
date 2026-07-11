@@ -14,7 +14,7 @@
  * user funds their own address (no minting off the boot chain).
  */
 import { createPublicClient, http, type Chain, type PublicClient, type Address } from 'viem';
-import { NETWORKS, usdtAddressFor, rpcUrlFor, type NetworkPreset } from './networks.js';
+import { NETWORKS, usdtAddressFor, rpcUrlFor, bundlerUrlFor, paymasterUrlFor, type NetworkPreset } from './networks.js';
 import { config } from '../config.js';
 import { chain as bootChain, publicClient as bootPublicClient } from './client.js';
 
@@ -107,6 +107,11 @@ export interface NetworkDescriptor {
    *  Public info. undefined for boot-local (runtime-deployed); the health route
    *  patches that in from the manager. */
   usdt?: string;
+  /** Layer C gasless (ERC-4337 + Candide USD₮ paymaster). Both present ⇒ the client
+   *  routes sends/buy-ins through a gasless UserOp (fan needs no ETH); either absent
+   *  ⇒ the client uses the M1 EOA-sign→relay path. Public RPC endpoints. */
+  bundler?: string;
+  paymaster?: string;
 }
 
 /** Every network the client can offer in the switcher, boot network first. */
@@ -125,6 +130,8 @@ export function listNetworks(): NetworkDescriptor[] {
       faucet: p.faucet,
       available: isNetworkAvailable(key),
       usdt: usdtAddressFor(key),
+      bundler: bundlerUrlFor(key),
+      paymaster: paymasterUrlFor(key),
     };
   });
 }

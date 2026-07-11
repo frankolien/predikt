@@ -10,6 +10,7 @@
 import type { Address } from "viem";
 import { api, type Health, type WalletAuth } from "./api";
 import * as signer from "./signer";
+import { gaslessConfigFor, sendUsdtGasless, type GaslessConfig } from "./gasless";
 import { keychainAvailable, keychainGet, SEED_KEY } from "./keychain";
 
 /**
@@ -95,9 +96,23 @@ export async function payBuyIn(opts: {
   treasury?: string | null; // health.operator
   bootNet?: string; // health.network.key — route the deposit to the boot chain
   buyInHuman: number;
+  gasless?: GaslessConfig | null; // Layer C: pay the stake gaslessly (gas-in-USD₮) when configured
 }): Promise<string> {
   if (!opts.usdtToken || !opts.treasury) throw new Error("The USD₮ rail isn't ready — try again in a moment.");
   const seed = await ensureSessionSeed();
+
+  // Layer C — gasless: build the stake as a UserOp (fan needs no ETH). The paymaster
+  // settles it as a normal USD₮ Transfer → the server's verifyDeposit is unchanged.
+  // On any failure fall through to the M1 EOA-sign→relay path (additive, §10.6).
+  if (opts.gasless) {
+    try {
+      const { hash } = await sendUsdtGasless(seed, opts.treasury as Address, opts.buyInHuman, opts.gasless);
+      return hash;
+    } catch (e) {
+      console.warn("gasless buy-in failed, falling back to EOA relay:", e);
+    }
+  }
+
   const from = signer.addressFromMnemonic(seed);
   const data = signer.erc20TransferData(opts.treasury as Address, signer.usdtBase(opts.buyInHuman));
   const prep = await api.tx.prepare(from, opts.usdtToken, data, opts.bootNet);
@@ -122,5 +137,8 @@ export async function payBuyInFor(
     treasury: health?.operator ?? undefined,
     bootNet: health?.network?.key,
     buyInHuman,
+    // Buy-ins settle on the boot network; gasless kicks in only when that network
+    // advertises a Candide bundler + paymaster (else this is null → M1 relay).
+    gasless: gaslessConfigFor(health?.network),
   });
 }

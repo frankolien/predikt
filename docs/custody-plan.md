@@ -420,15 +420,44 @@ custody holds either way.
 - **C3:** gasless **buy-ins** — route `payBuyIn` through the UserOp path; server verify
   unchanged. Optional sponsored first-action.
 
-### 10.8 Open decisions
+### 10.8 Open decisions — RESOLVED (2026-07-11)
 
-1. **Paymaster provider** on Arbitrum One with a USD₮ ERC-20 paymaster (Pimlico vs
-   Candide vs Alchemy) — pick by Arbitrum + USD₮0 support.
-2. **7702 (A) vs smart-account (B)** — recommend B now; revisit A for one-address.
-3. **Sponsor the first action?** Nice onboarding touch; needs a small funded paymaster.
-4. **USD₮ vs USD₮0** on Arbitrum One as the gas + stake token (ties to §GAFFER_USDT_ADDRESS_ARBITRUM).
+1. **Paymaster provider → Candide.** Settled by the SDK: `@tetherto/wdk-wallet-evm-erc-4337`
+   is built on `abstractionkit` (Candide's SDK, which ships `CandidePaymaster`). We use
+   `abstractionkit` directly on the client (lighter, browser-safe) rather than the
+   Node/Bare WDK wrapper. **Still needed from us:** a Candide **Arbitrum One bundler +
+   USD₮ paymaster** endpoint/API key (env `GAFFER_BUNDLER_URL_ARBITRUM` /
+   `GAFFER_PAYMASTER_URL_ARBITRUM`).
+2. **7702 (A) vs smart-account (B) → A (EIP-7702).** Verified 7702 is live on Arbitrum
+   One (ArbOS 40 "Callisto", Pectra) and `abstractionkit` ships `Simple7702Account`.
+   Proven offline: the 7702 account address == the EOA address (`0xf39F…2266` → itself),
+   so identity/`walletAddress` is **unchanged — zero migration**, one address across
+   points/testnet/mainnet. (B — Safe — derived a *new* address `0xFD8A…8C01`; rejected.)
+3. **Sponsor the first action?** Deferred — nice-to-have; add a verifying paymaster later.
+4. **USD₮ vs USD₮0** on Arbitrum One — still to confirm; the paymaster's gas token must
+   match the stake token (`GAFFER_USDT_ADDRESS_ARBITRUM`). Decide when wiring the endpoint.
 
-### 10.9 Risks
+### 10.9 Build status (2026-07-11) — C1 done, C2/C3 wired-but-untested-until-keys
+
+- **C1 (done, offline-verified):** `abstractionkit@0.4.0` added to web (lazy-imported →
+  its own 99 kB chunk, main bundle unchanged). Smart-account = EOA proven from a seed
+  with zero network calls. Server exposes per-network `bundler`/`paymaster` from env
+  (`chain/networks.ts` `bundlerUrlFor`/`paymasterUrlFor` → `NetworkDescriptor` → `/api/health`).
+- **C2/C3 (written, type-checked against the real SDK, NOT yet run live):**
+  [`web/src/lib/gasless.ts`](../web/src/lib/gasless.ts) — `sendUsdtGasless()`:
+  `Simple7702Account.createUserOperation` → `CandidePaymaster.createTokenPaymasterUserOperation`
+  (gas-in-USD₮, approve batched, exposes `tokenQuote`) → local `signUserOperation` →
+  `sendUserOperation` → `included()`. `gaslessConfigFor(net)` returns null (⇒ M1 relay)
+  until both endpoints are configured. Wired into the **buy-in** path (`payBuyIn`/`payBuyInFor`,
+  self-contained via health) with a try/catch fallback to the M1 EOA relay — so it's
+  **inert and deploy-safe today**, and gasless real-money stakes light up the moment the
+  Candide endpoints are set on the server. Gasless **send** is a one-line follow-up (pass
+  the active net's config from the Hub SendModal).
+- **Untested-until-keys:** live bundler/paymaster round-trip (needs the Candide endpoint).
+  Two spots to confirm on first live run: the `createUserOperation` provider-RPC arg (using
+  the bundler URL for eth_* reads) and the 7702-authorization attachment inside `signUserOperation`.
+
+### 10.10 Risks
 
 - 7702/AA support + WDK 4337 API maturity (beta) — verify before committing to A.
 - Paymaster provider coverage for Arbitrum One + the chosen USD₮ token.

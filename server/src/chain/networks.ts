@@ -115,3 +115,21 @@ export function usdtAddressFor(key: string): `0x${string}` | undefined {
 export function rpcUrlFor(key: string): string {
   return process.env[`GAFFER_RPC_URL_${envSuffix(key)}`] || (NETWORKS[key]?.defaultRpc ?? '');
 }
+
+/**
+ * ERC-4337 bundler URL for a network (Layer C gasless): GAFFER_BUNDLER_URL_<KEY>.
+ * undefined ⇒ no gasless on this network → the client falls back to the M1
+ * EOA-sign→relay path. Public info (a bundler RPC), so it's safe in /api/health.
+ */
+export function bundlerUrlFor(key: string): string | undefined {
+  return process.env[`GAFFER_BUNDLER_URL_${envSuffix(key)}`] || undefined;
+}
+
+/**
+ * Candide (ERC-20/USD₮) paymaster URL for a network: GAFFER_PAYMASTER_URL_<KEY>.
+ * undefined ⇒ no gasless. Present with a bundler ⇒ gas-in-USD₮ is available and
+ * the fan never needs ETH. Public info (a paymaster RPC endpoint).
+ */
+export function paymasterUrlFor(key: string): string | undefined {
+  return process.env[`GAFFER_PAYMASTER_URL_${envSuffix(key)}`] || undefined;
+}

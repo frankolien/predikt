@@ -120,6 +120,11 @@ export interface NetworkInfo {
   available?: boolean;
   /** USD₮ token address on this network — the client builds transfers against it. */
   usdt?: string;
+  /** Layer C gasless (ERC-4337 + Candide USD₮ paymaster). When both are present the
+   *  client routes sends/buy-ins through a gasless UserOp (no ETH needed); otherwise
+   *  it uses the M1 EOA-sign→relay path. See web/src/lib/gasless.ts. */
+  bundler?: string;
+  paymaster?: string;
 }
 
 export interface Health {
