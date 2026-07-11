@@ -57,20 +57,37 @@ export async function sendUsdtGasless(
   amountHuman: number,
   cfg: GaslessConfig,
 ): Promise<{ hash: string }> {
-  const { Simple7702Account, CandidePaymaster } = await import("abstractionkit");
+  const { Simple7702AccountV09, CandidePaymaster, createAndSignEip7702DelegationAuthorization } = await import(
+    "abstractionkit"
+  );
   const owner = signer.addressFromMnemonic(mnemonic);
   const key = signer.privateKeyFromMnemonic(mnemonic);
+  const chainId = BigInt(cfg.chainId);
 
   // The 7702 smart account IS the fan's EOA (same address) with smart-account powers.
-  const account = new Simple7702Account(owner);
+  // EntryPoint v0.9 — Candide's Arbitrum bundler rejects v0.8 7702 ops (opaque
+  // SIMULATE_VALIDATION error) but accepts v0.9; verified live on Arbitrum One.
+  const account = new Simple7702AccountV09(owner);
   const transfer = {
     to: cfg.usdt,
     value: 0n,
     data: signer.erc20TransferData(to, signer.usdtBase(amountHuman)),
   };
 
-  // 1. Build the UserOp (reads nonce/gas via the RPC).
-  let userOp = await account.createUserOperation([transfer], cfg.bundler, cfg.bundler);
+  // 1. Build the UserOp. On the FIRST op the EOA isn't yet delegated, so we attach +
+  //    sign an EIP-7702 delegation authorization (locally, with the fan's key); once
+  //    delegated, createUserOperation returns a null auth and we skip it.
+  let userOp = await account.createUserOperation([transfer], cfg.bundler, cfg.bundler, {
+    eip7702Auth: { chainId },
+  });
+  if (userOp.eip7702Auth) {
+    userOp.eip7702Auth = createAndSignEip7702DelegationAuthorization(
+      BigInt(userOp.eip7702Auth.chainId),
+      userOp.eip7702Auth.address,
+      BigInt(userOp.eip7702Auth.nonce),
+      key,
+    );
+  }
 
   // 2. Gas-in-USD₮: Candide's ERC-20 paymaster sponsors gas by pulling a little of
   //    the fan's USD₮ (the approve is batched in) — no ETH anywhere, nothing to run
@@ -79,8 +96,8 @@ export async function sendUsdtGasless(
   const sponsored = await paymaster.createTokenPaymasterUserOperation(account, userOp, cfg.usdt, cfg.bundler);
   userOp = sponsored.userOperation;
 
-  // 3. Sign LOCALLY (EIP-7702 authorization + userOpHash) — the key never leaves here.
-  userOp.signature = account.signUserOperation(userOp, key, BigInt(cfg.chainId));
+  // 3. Sign LOCALLY (userOpHash) — the key never leaves here.
+  userOp.signature = account.signUserOperation(userOp, key, chainId);
 
   // 4. Submit through the bundler and wait for the on-chain receipt.
   const resp = await account.sendUserOperation(userOp, cfg.bundler);

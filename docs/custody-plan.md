@@ -457,6 +457,37 @@ custody holds either way.
   Two spots to confirm on first live run: the `createUserOperation` provider-RPC arg (using
   the bundler URL for eth_* reads) and the 7702-authorization attachment inside `signUserOperation`.
 
+**Candide endpoint verified (2026-07-11, read-only):** the Candide V3 **unified** endpoint
+`https://api.candide.dev/api/v3/42161/<key>` (one URL for bundler + paymaster) is live —
+`chainId` = 0xa4b1 (Arbitrum One); supported EntryPoints include **v0.8**
+`0x4337084D9E255Ff0702461CF8895CE9E3b5Ff108` (exactly what `Simple7702Account`/UserOperationV8
+needs); supported ERC-20 gas tokens = USDC, **USDT `0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9`
+(6 dp)**, DAI, XAUt0, EURe. So the stake/gas token is **canonical USD₮** (== our
+`ARBITRUM_ONE_USDT` default; **no `GAFFER_USDT_ADDRESS_ARBITRUM` override needed**, USD₮0 not used).
+Config: set `GAFFER_BUNDLER_URL_ARBITRUM` and `GAFFER_PAYMASTER_URL_ARBITRUM` both to the unified
+endpoint. Note: gasless buy-ins engage only when the BOOT network is `arbitrum`
+(GAFFER_NETWORK=arbitrum), since buy-ins settle on the boot chain.
+
+**GASLESS PROVEN LIVE (2026-07-11) — Arbitrum One mainnet, zero-ETH wallet:** a sponsored 7702
+UserOp from a brand-new empty wallet delegated the EOA and executed on-chain, gas paid entirely by
+a Candide sponsorship policy. Tx `0x899fe309cf4ea4805ea0409fb6688f404ba269c53c8a2a2a730b21eba8cbb126`
+(status success, 147k gas); the EOA gained delegation code `0xef0100…`. **Critical integration
+finding — use EntryPoint v0.9, not v0.8:** `Simple7702Account` (EP v0.8) fails on Candide's Arbitrum
+bundler with an opaque `SIMULATE_VALIDATION` error (returns the EntryPoint bytecode as the message);
+`Simple7702AccountV09` (EP v0.9, `0x433709009B8330FDa32311DF1C2AFA402eD8D009`) works. Both
+`gasless.ts` and `scripts/gasless-verify.mjs` now use `Simple7702AccountV09`. Everything else on the
+client was verified correct (auth signature recovers to the EOA, delegatee `0xe6Cae83…`/v0.9
+`0xa46cc63e…` deployed, abstractionkit serializes eip7702Auth into eth_sendUserOperation). Two
+paymaster modes BOTH PROVEN live on Arbitrum One: **sponsored** (Candide gas policy pays — needs a
+funded policy = a platform ETH tank) — tx `0x899fe309…`; **token/gas-in-USD₮** (fan pays gas in their
+own USD₮, no platform ETH — the production path) — tx
+`0x299ea2b3c89fc2d57b7c248e9d45cdb4703b5d6caf73c90a8fde8f83968c0ba0`, a wallet with ~0 ETH paid gas
+in USD₮ (~1.6¢, tokenCost 15579), ETH balance unchanged. **This eliminates the operator-gas-tank
+fragility from §10 entirely** (no ETH to run dry). Candide token list confirms USD₮ `0xFd086bC7…`
+supported; the paymaster returns a `tokenQuote` (exchangeRate + tokenCost) = the honest USD₮ gas fee
+to surface in the UI. Layer C gasless is DONE and on-chain-proven; remaining = commit + deploy (set
+`GAFFER_BUNDLER_URL_ARBITRUM`/`GAFFER_PAYMASTER_URL_ARBITRUM` + `GAFFER_NETWORK=arbitrum`).
+
 ### 10.10 Risks
 
 - 7702/AA support + WDK 4337 API maturity (beta) — verify before committing to A.
