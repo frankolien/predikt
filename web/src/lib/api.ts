@@ -147,7 +147,10 @@ export interface Health {
 export function resolveNetwork(health: Health | null, walletNetwork: string | null): NetworkInfo | null {
   if (!health) return null;
   const list = health.networks ?? (health.network ? [health.network] : []);
-  const boot = health.network ?? list[0] ?? null;
+  // Prefer the boot net's FULL descriptor from the list — it carries usdt/bundler/
+  // paymaster; health.network is a leaner object without the token fields, so falling
+  // back to it bare makes send/buy-in think USD₮ is unavailable.
+  const boot = list.find((n) => n.key === health.network?.key) ?? health.network ?? list[0] ?? null;
   if (walletNetwork) {
     // Only honour a selection the server still offers — a net that became
     // unavailable (e.g. across a redeploy) would make the badge lie about the
