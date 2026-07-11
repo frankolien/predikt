@@ -132,13 +132,18 @@ export async function payBuyInFor(
   buyInHuman: number,
 ): Promise<string | undefined> {
   if (currency !== "usdt" || !buyInHuman || buyInHuman <= 0) return undefined;
+  // Buy-ins settle on the boot network. health.network is a LEAN descriptor (no
+  // usdt/bundler/paymaster), so resolve the boot net's FULL entry from health.networks
+  // — otherwise gaslessConfigFor sees nothing and the buy-in falls back to the M1
+  // relay (which needs ETH the fan doesn't have on mainnet).
+  const bootNet = health?.networks?.find((n) => n.key === health?.network?.key) ?? health?.network ?? null;
   return payBuyIn({
-    usdtToken: health?.usdt ?? undefined,
+    usdtToken: bootNet?.usdt ?? health?.usdt ?? undefined,
     treasury: health?.operator ?? undefined,
     bootNet: health?.network?.key,
     buyInHuman,
-    // Buy-ins settle on the boot network; gasless kicks in only when that network
-    // advertises a Candide bundler + paymaster (else this is null → M1 relay).
-    gasless: gaslessConfigFor(health?.network),
+    // Gasless kicks in only when the boot network advertises a Candide bundler +
+    // paymaster (else this is null → M1 relay).
+    gasless: gaslessConfigFor(bootNet),
   });
 }
