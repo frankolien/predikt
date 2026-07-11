@@ -464,19 +464,9 @@ export const api = {
     post<FixtureSummary>(`/dev/live/${id}`, { minute, homeGoals, awayGoals, status }),
   clearLive: (id: string) => del<FixtureSummary>(`/dev/live/${id}`),
 
-  // ---- wallet-as-identity auth (self-custodial) ----
+  // ---- wallet-as-identity auth · client-side custody (the seed NEVER leaves the device) ----
+  // 1. get the SIWE challenge to sign, 2a. register a new address, 2b. verify (sign in).
   auth: {
-    // Create a brand-new wallet + account; recovery phrase returned once.
-    // LEGACY (server-generated seed) — kept for rollback; client-custody uses the
-    // challenge/register path below. See docs/custody-plan.md.
-    newWallet: (handle?: string) => post<WalletAuth>("/auth/wallet/new", handle ? { handle } : {}),
-    // Sign in / recover an account from its BIP-39 recovery phrase (LEGACY — sends
-    // the seed to the server). Client-custody uses challenge → verify instead.
-    restore: (mnemonic: string, handle?: string) =>
-      post<WalletAuth>("/auth/wallet/restore", handle ? { mnemonic, handle } : { mnemonic }),
-
-    // ---- client-side custody (the seed NEVER leaves the device) ----
-    // 1. get the SIWE challenge to sign, 2a. register a new address, 2b. verify (sign in).
     challenge: (address: string) => post<{ message: string; nonce: string }>("/auth/challenge", { address }),
     register: (message: string, signature: string, handle?: string) =>
       post<WalletAuth>("/auth/register", handle ? { message, signature, handle } : { message, signature }),
@@ -503,8 +493,7 @@ export const api = {
       ),
     connectWallet: () =>
       post<{ address: string; usdtHuman: number; backend: string; mnemonic?: string }>("/account/wallet"),
-    // send USD₮ to any address from your self-custodial wallet
-    send: (to: string, amount: number) => post<{ txHash: string; usdtHuman: number }>("/account/send", { to, amount }),
+    // (Send USD₮ is client-signed + relayed via api.tx — not a server endpoint.)
   },
   leaderboard: () => get<{ leaderboard: Account[] }>("/leaderboard"),
   pools: {

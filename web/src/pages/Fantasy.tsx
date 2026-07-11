@@ -18,6 +18,7 @@ import { BootScreen } from "../components/BootScreen";
 import { SquadBuilder, type SquadState } from "../components/fantasy/SquadBuilder";
 import { FantasyPitch } from "../components/fantasy/FantasyPitch";
 import { useApp } from "../context";
+import { payBuyInFor } from "../lib/custody";
 import { api, type FantasyLeague, type FantasyStanding } from "../lib/api";
 import { usdt } from "../lib/format";
 
@@ -168,6 +169,7 @@ function LeagueActions({
   onOpen: (l: FantasyLeague) => void;
   refreshAccount: () => void;
 }) {
+  const { health, account } = useApp();
   const [name, setName] = useState("");
   const [buyIn, setBuyIn] = useState(50);
   const [currency, setCurrency] = useState<"points" | "usdt">("points");
@@ -197,7 +199,8 @@ function LeagueActions({
     setBusy("create");
     try {
       const lg = await api.fantasy.createLeague({ name: name.trim() || "Fantasy League", buyIn, splitBps: split.bps, currency });
-      const full = await api.fantasy.join({ leagueId: lg.id, ...entry() });
+      const depositTx = await payBuyInFor(health, currency, buyIn); // client-signed USD₮ buy-in (fresh league → safe to pay)
+      const full = await api.fantasy.join({ leagueId: lg.id, ...entry(), depositTx });
       refreshAccount();
       onOpen(full);
     } catch (e) {
@@ -206,14 +209,22 @@ function LeagueActions({
       setBusy(null);
     }
   };
-
+1
   const join = async () => {
     setErr(null);
     if (!code.trim()) return;
     if (!guard()) return;
     setBusy("join");
     try {
-      const lg = await api.fantasy.join({ code: code.trim(), ...entry() });
+      // Resolve first: pay the USD₮ buy-in (client-signed) only if we're not already in.
+      const c = code.trim();
+      const existing = await api.fantasy.leagueByCode(c);
+      if (existing.standings?.some((s) => s.userId === account?.id)) {
+        onOpen(existing);
+        return;
+      }
+      const depositTx = await payBuyInFor(health, existing.currency, existing.buyIn);
+      const lg = await api.fantasy.join({ code: c, ...entry(), depositTx });
       refreshAccount();
       onOpen(lg);
     } catch (e) {

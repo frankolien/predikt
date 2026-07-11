@@ -8,16 +8,9 @@
  * See docs/custody-plan.md.
  */
 import type { Address } from "viem";
-import { api, type WalletAuth } from "./api";
+import { api, type Health, type WalletAuth } from "./api";
 import * as signer from "./signer";
 import { keychainAvailable, keychainGet, SEED_KEY } from "./keychain";
-
-/**
- * Feature flag. When on (default), auth + send run fully client-side; when off,
- * the legacy server-signed path is used (rollback). Set VITE_CLIENT_CUSTODY=0 to
- * fall back. See docs/custody-plan.md §8.
- */
-export const CLIENT_CUSTODY = (import.meta.env.VITE_CLIENT_CUSTODY as string | undefined) !== "0";
 
 /**
  * In-memory session seed. To sign transactions client-side we keep the decrypted
@@ -111,4 +104,23 @@ export async function payBuyIn(opts: {
   const rawTx = await signer.signTx(seed, { to: opts.usdtToken as Address, data }, prep);
   const { hash } = await api.tx.relay(rawTx, opts.bootNet);
   return hash;
+}
+
+/**
+ * Pay a USD₮ buy-in for a pool/cup/league from `health`. Returns the deposit tx
+ * hash to pass to the join call, or undefined for points/free entries (no deposit).
+ * The server verifies the hash on-chain before recording the join.
+ */
+export async function payBuyInFor(
+  health: Health | null,
+  currency: "points" | "usdt" | undefined,
+  buyInHuman: number,
+): Promise<string | undefined> {
+  if (currency !== "usdt" || !buyInHuman || buyInHuman <= 0) return undefined;
+  return payBuyIn({
+    usdtToken: health?.usdt ?? undefined,
+    treasury: health?.operator ?? undefined,
+    bootNet: health?.network?.key,
+    buyInHuman,
+  });
 }

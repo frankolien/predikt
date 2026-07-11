@@ -256,21 +256,6 @@ export async function createWallet(displayName: string): Promise<{
   };
 }
 
-/** Re-register a wallet from an existing recovery phrase (returning user). */
-export async function importWallet(mnemonic: string, displayName: string): Promise<{
-  address: Address;
-  displayName: string;
-  backend: string;
-  usdtHuman: number;
-}> {
-  const fan = await wallet.importFan(mnemonic, displayName);
-  return {
-    address: fan.address,
-    displayName: fan.displayName,
-    backend: fan.backend,
-    usdtHuman: await walletBalance(fan.address),
-  };
-}
 
 export interface JoinInput {
   fixtureId: string;

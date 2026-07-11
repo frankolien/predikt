@@ -290,6 +290,19 @@ export const fantasySquadPlayers = pgTable(
   }),
 );
 
+/**
+ * Client-side-custody buy-ins: a USD₮ deposit the FAN signed + broadcast is
+ * verified on-chain, then its tx hash is recorded here so it can never fund a
+ * second join. The primary key IS the replay lock — a duplicate insert fails.
+ * See docs/custody-plan.md §5.
+ */
+export const consumedDeposits = pgTable('consumed_deposits', {
+  txHash: text('tx_hash').primaryKey(),
+  userId: text('user_id').notNull(),
+  purpose: text('purpose').notNull(), // 'pool:<id>' | 'cup:<id>' | 'league:<id>' — binds the tx to its target
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
+});
+
 export type User = typeof users.$inferSelect;
 export type Pool = typeof pools.$inferSelect;
 export type PoolMember = typeof poolMembers.$inferSelect;

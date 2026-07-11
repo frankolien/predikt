@@ -4,6 +4,8 @@ import { api, type FixtureSummary, type PointsPool } from "../lib/api";
 import { Button, Card, Crest, Eyebrow } from "./ui";
 import { impliedReturn, oddsLabel, outcomeText, usdt } from "../lib/format";
 import { cn } from "../lib/cn";
+import { useApp } from "../context";
+import { payBuyInFor } from "../lib/custody";
 
 const BUYINS = [25, 50, 100, 250];
 const USDT_BUYINS = [1, 5, 10, 25];
@@ -58,6 +60,7 @@ export function PoolHub({
   prefill?: { homeGoals: number; awayGoals: number } | null;
   onEntered: (pool: PointsPool) => void;
 }) {
+  const { health, account } = useApp();
   const [home, setHome] = useState(1);
   const [away, setAway] = useState(1);
 
@@ -92,26 +95,30 @@ export function PoolHub({
       setBusy(false);
     }
   };
+  // USD₮ buy-ins are signed by the fan on-device (client custody) BEFORE the join,
+  // which the server verifies on-chain. Since the treasury can't auto-refund a
+  // doomed join (Layer B), we only deposit once we know the join will take —
+  // fresh pool (create), or a pool we've confirmed is open + we're not already in.
   const createAndJoin = () =>
     wrap(async () => {
       const pool = await api.pools.create(fixture.id, { name: name.trim() || undefined, buyIn, isPublic: true, currency });
-      return (await api.pools.join({ poolId: pool.id, prediction })).pool;
+      const depositTx = await payBuyInFor(health, currency, buyIn);
+      return (await api.pools.join({ poolId: pool.id, prediction, depositTx })).pool;
     });
   const joinByCode = () =>
     wrap(async () => {
       const c = code.trim();
-      try {
-        return (await api.pools.join({ code: c, prediction })).pool;
-      } catch (e) {
-        // Already in this pool? That's not a failure — just open it so you land
-        // on your existing entry instead of a dead-end error.
-        if ((e as Error).message.toLowerCase().includes("already joined")) {
-          return await api.pools.byCode(c);
-        }
-        throw e;
-      }
+      const pool = await api.pools.byCode(c); // resolve first: check currency + membership before paying
+      if (pool.members?.some((m) => m.userId === account?.id)) return pool; // already in — just open it
+      const depositTx = await payBuyInFor(health, pool.currency, pool.buyIn);
+      return (await api.pools.join({ code: c, prediction, depositTx })).pool;
     });
-  const joinPublic = (p: PointsPool) => wrap(async () => (await api.pools.join({ poolId: p.id, prediction })).pool);
+  const joinPublic = (p: PointsPool) =>
+    wrap(async () => {
+      if (p.members?.some((m) => m.userId === account?.id)) return p; // already in — open it, don't re-pay
+      const depositTx = await payBuyInFor(health, p.currency, p.buyIn);
+      return (await api.pools.join({ poolId: p.id, prediction, depositTx })).pool;
+    });
 
   return (
     <Card className="p-5">

@@ -121,20 +121,6 @@ export function isValidMnemonic(input: string): boolean {
   return words.every((w) => english.includes(w));
 }
 
-/**
- * Re-register a fan from an EXISTING recovery phrase (a returning user signing
- * in). Derives the same deterministic address and holds the key in memory so the
- * fan can sign this session's buy-ins. Throws on an invalid phrase.
- */
-export async function importFan(mnemonic: string, displayName: string): Promise<NewFan> {
-  await ensureBackend();
-  const phrase = normalizeMnemonic(mnemonic);
-  if (!isValidMnemonic(phrase)) throw new Error('invalid recovery phrase');
-  const address = await deriveAddress(phrase);
-  fans.set(address.toLowerCase(), { address, displayName, mnemonic: phrase });
-  return { address, displayName, mnemonic: phrase, backend };
-}
-
 export function getFan(address: string): FanRecord | undefined {
   return fans.get(address.toLowerCase());
 }
@@ -229,41 +215,3 @@ export async function joinPool(params: {
   return { approveTx, depositTx, backend };
 }
 
-/**
- * Fan sends USDt straight to another address (a real ERC-20 transfer, signed by
- * the fan's own key). This is the deposit leg of the generic escrow used by
- * pools, cups and leagues: the fan pays their buy-in into the treasury.
- */
-export async function transferUsdt(
-  params: {
-    from: Address;
-    token: Address;
-    to: Address;
-    amount: bigint;
-  },
-  ctx: ChainCtx = bootCtx,
-): Promise<{ txHash: Hex; backend: WalletBackend }> {
-  await ensureBackend();
-  const fan = getFan(params.from);
-  if (!fan) throw new Error(`Unknown fan wallet: ${params.from}`);
-  const data = encodeFunctionData({
-    abi: artifacts.MockUSDT.abi,
-    functionName: 'transfer',
-    args: [params.to, params.amount],
-  });
-
-  if (backend === 'wdk') {
-    const acc = wdkAccount(fan.mnemonic, ctx.rpcUrl);
-    const nonce = await ctx.publicClient.getTransactionCount({ address: params.from, blockTag: 'pending' });
-    const res = await acc.sendTransaction({ to: params.token, value: 0n, data, nonce });
-    const txHash = (res?.hash ?? res) as Hex;
-    await ctx.publicClient.waitForTransactionReceipt({ hash: txHash });
-    return { txHash, backend };
-  }
-
-  const account = mnemonicToAccount(fan.mnemonic, { addressIndex: 0 });
-  const wallet = createWalletClient({ account, chain: ctx.chain, transport: http(ctx.rpcUrl) });
-  const txHash = await wallet.sendTransaction({ account, chain: ctx.chain, to: params.token, value: 0n, data });
-  await ctx.publicClient.waitForTransactionReceipt({ hash: txHash });
-  return { txHash, backend };
-}

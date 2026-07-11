@@ -2,9 +2,8 @@ import { useState } from "react";
 import { Coins, ArrowRight, Wallet, KeyRound, Copy, Check, Loader2, Lock } from "lucide-react";
 import { Button, Card, Eyebrow, Pill } from "./ui";
 import { useApp } from "../context";
-import { api, type WalletAuth } from "../lib/api";
 import { saveSeed } from "../lib/vault";
-import { CLIENT_CUSTODY, generateWallet, addressOf, registerWallet, signInWallet, setSessionSeed } from "../lib/custody";
+import { generateWallet, addressOf, registerWallet, signInWallet, setSessionSeed } from "../lib/custody";
 
 type View = "create" | "reveal" | "restore" | "setpin";
 
@@ -21,8 +20,7 @@ export function Onboard({ onDone }: { onDone?: () => void }) {
   const [error, setError] = useState<string | null>(null);
 
   // create → reveal
-  const [auth, setAuth] = useState<WalletAuth | null>(null); // legacy path only
-  const [genMnemonic, setGenMnemonic] = useState(""); // client-custody: seed generated on-device
+  const [genMnemonic, setGenMnemonic] = useState(""); // seed generated on-device
   const [saved, setSaved] = useState(false);
   const [copied, setCopied] = useState(false);
 
@@ -37,20 +35,12 @@ export function Onboard({ onDone }: { onDone?: () => void }) {
     setBusy(true);
     setError(null);
     try {
-      if (CLIENT_CUSTODY) {
-        // Generate the wallet ON THIS DEVICE — no account exists yet, nothing is
-        // sent. We reveal the phrase, then register (sign a challenge) on commit.
-        const { mnemonic } = generateWallet();
-        setGenMnemonic(mnemonic);
-        setSaved(false);
-        setView("reveal");
-      } else {
-        // Legacy: the server generates the seed + account and starts funding.
-        const r = await api.auth.newWallet(handle.trim() || undefined);
-        setAuth(r);
-        setSaved(false);
-        setView("reveal");
-      }
+      // Generate the wallet ON THIS DEVICE — no account exists yet, nothing is sent.
+      // We reveal the phrase, then register (sign a SIWE challenge) on commit.
+      const { mnemonic } = generateWallet();
+      setGenMnemonic(mnemonic);
+      setSaved(false);
+      setView("reveal");
     } catch {
       setError("Couldn't create your wallet — try again.");
     } finally {
@@ -58,9 +48,8 @@ export function Onboard({ onDone }: { onDone?: () => void }) {
     }
   };
 
-  // The seed being onboarded: client-custody create → generated on-device; restore
-  // → the phrase typed; legacy create → returned once as auth.mnemonic.
-  const seed = genMnemonic || auth?.mnemonic || phrase.trim();
+  // The seed being onboarded: create → generated on-device; restore → the phrase typed.
+  const seed = genMnemonic || phrase.trim();
 
   const copyPhrase = async () => {
     if (!seed) return;
@@ -77,7 +66,7 @@ export function Onboard({ onDone }: { onDone?: () => void }) {
   // device with a PIN before the session goes live — so the signing key can be
   // re-loaded on a later visit without re-typing 12 words.
   const finishReveal = () => {
-    if (!genMnemonic && !auth) return;
+    if (!genMnemonic) return;
     setView("setpin");
   };
 
@@ -87,14 +76,8 @@ export function Onboard({ onDone }: { onDone?: () => void }) {
     setBusy(true);
     setError(null);
     try {
-      if (CLIENT_CUSTODY) {
-        addressOf(m); // derive locally — throws on an invalid phrase (no server call)
-        setView("setpin");
-      } else {
-        const r = await api.auth.restore(m); // legacy: validates + loads the key server-side
-        setAuth(r);
-        setView("setpin");
-      }
+      addressOf(m); // derive locally — throws on an invalid phrase (no server call)
+      setView("setpin");
     } catch (e) {
       setError((e as Error).message?.match(/mnemonic|word/i) ? "That doesn't look like a valid 12-word phrase." : (e as Error).message || "Couldn't restore — check your phrase.");
     } finally {
@@ -102,16 +85,12 @@ export function Onboard({ onDone }: { onDone?: () => void }) {
     }
   };
 
-  // Commit the session. Client-custody signs a challenge here (register for a fresh
-  // wallet, verify for a restore) and keeps the seed in session memory to sign txs.
+  // Commit the session: sign a SIWE challenge (register for a fresh wallet, verify
+  // for a restore) and keep the seed in session memory to sign this device's txs.
   const commitSession = async () => {
-    if (CLIENT_CUSTODY) {
-      const r = genMnemonic ? await registerWallet(seed, handle.trim() || undefined) : await signInWallet(seed);
-      commitAuth(r);
-      setSessionSeed(seed);
-    } else if (auth) {
-      commitAuth(auth);
-    }
+    const r = genMnemonic ? await registerWallet(seed, handle.trim() || undefined) : await signInWallet(seed);
+    commitAuth(r);
+    setSessionSeed(seed);
   };
 
   const setPinAndGo = async () => {
@@ -129,7 +108,7 @@ export function Onboard({ onDone }: { onDone?: () => void }) {
   };
 
   const skipPin = async () => {
-    if (!seed && !auth) return;
+    if (!seed) return;
     setBusy(true);
     setError(null);
     try {
@@ -145,9 +124,9 @@ export function Onboard({ onDone }: { onDone?: () => void }) {
     "flex-1 rounded-default border border-edge-2 bg-panel-2 px-3 py-2.5 font-mono text-[14px] text-chalk placeholder:text-faint focus:border-edge-3 focus:outline-none";
 
   /* ---------------- reveal: save your recovery phrase (shown once) --------- */
-  if (view === "reveal" && (genMnemonic || auth)) {
+  if (view === "reveal" && genMnemonic) {
     const words = seed.split(" ");
-    const addr = genMnemonic ? addressOf(genMnemonic) : (auth?.wallet.address ?? "");
+    const addr = addressOf(genMnemonic);
     return (
       <Card className="p-5">
         <div className="flex items-center justify-between">

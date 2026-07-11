@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { KeyRound, Copy, Check, Cpu, ShieldCheck, ArrowRight, Loader2, Lock } from "lucide-react";
-import { api, aiStatusLocal, type WalletAuth, type AiStatus } from "../lib/api";
+import { aiStatusLocal, type WalletAuth, type AiStatus } from "../lib/api";
 import { useApp } from "../context";
 import { keychainSet, SEED_KEY } from "../lib/keychain";
+import { generateWallet, addressOf, registerWallet, signInWallet, setSessionSeed } from "../lib/custody";
 import { Mark } from "./Logo";
 import { Button } from "./ui";
 import onboardingVideo from "../assets/onboarding.mp4";
@@ -41,7 +42,8 @@ export function DesktopOnboarding({ onClose }: { onClose: () => void }) {
     };
   }, []);
   const [handle, setHandle] = useState("");
-  const [auth, setAuth] = useState<WalletAuth | null>(null);
+  const [auth, setAuth] = useState<WalletAuth | null>(null); // registered session, committed on Enter
+  const [genMnemonic, setGenMnemonic] = useState(""); // seed generated on-device
   const [phrase, setPhrase] = useState("");
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -51,8 +53,10 @@ export function DesktopOnboarding({ onClose }: { onClose: () => void }) {
     setBusy(true);
     setErr(null);
     try {
-      const r = await api.auth.newWallet(handle.trim() || undefined);
-      setAuth(r);
+      // Generate the wallet ON THIS MACHINE — nothing is sent. We reveal the phrase,
+      // then register (sign a SIWE challenge) after they've saved it.
+      const { mnemonic } = generateWallet();
+      setGenMnemonic(mnemonic);
       setStep("reveal");
     } catch (e) {
       setErr((e as Error).message);
@@ -67,12 +71,14 @@ export function DesktopOnboarding({ onClose }: { onClose: () => void }) {
     setBusy(true);
     setErr(null);
     try {
-      const r = await api.auth.restore(m);
-      setAuth(r);
+      addressOf(m); // derive locally — throws on an invalid phrase (no server call)
       await secure(m);
+      const r = await signInWallet(m); // SIWE challenge — the seed never leaves the device
+      setAuth(r);
+      setSessionSeed(m);
       setStep("provision");
     } catch (e) {
-      setErr((e as Error).message || "Couldn't restore — check your phrase.");
+      setErr((e as Error).message?.match(/mnemonic|word/i) ? "That doesn't look like a valid 12-word phrase." : (e as Error).message || "Couldn't restore — check your phrase.");
     } finally {
       setBusy(false);
     }
@@ -88,8 +94,19 @@ export function DesktopOnboarding({ onClose }: { onClose: () => void }) {
   };
 
   const afterReveal = async () => {
-    if (auth?.mnemonic) await secure(auth.mnemonic);
-    setStep("provision");
+    setBusy(true);
+    setErr(null);
+    try {
+      await secure(genMnemonic);
+      const r = await registerWallet(genMnemonic, handle.trim() || undefined); // client-signed register
+      setAuth(r);
+      setSessionSeed(genMnemonic);
+      setStep("provision");
+    } catch (e) {
+      setErr((e as Error).message || "Couldn't finish — try again.");
+    } finally {
+      setBusy(false);
+    }
   };
 
   const enter = () => {
@@ -137,8 +154,8 @@ export function DesktopOnboarding({ onClose }: { onClose: () => void }) {
             onSkip={onClose}
           />
         )}
-        {step === "reveal" && auth && (
-          <Reveal auth={auth} copied={copied} setCopied={setCopied} onContinue={afterReveal} />
+        {step === "reveal" && genMnemonic && (
+          <Reveal mnemonic={genMnemonic} busy={busy} err={err} copied={copied} setCopied={setCopied} onContinue={afterReveal} />
         )}
         {step === "restore" && (
           <Restore
@@ -220,20 +237,24 @@ function Welcome({
 
 /* ---------------- step 2: reveal + keychain ---------------- */
 function Reveal({
-  auth,
+  mnemonic,
+  busy,
+  err,
   copied,
   setCopied,
   onContinue,
 }: {
-  auth: WalletAuth;
+  mnemonic: string;
+  busy: boolean;
+  err: string | null;
   copied: boolean;
   setCopied: (v: boolean) => void;
   onContinue: () => void;
 }) {
   const [saved, setSaved] = useState(false);
-  const words = (auth.mnemonic || "").trim().split(/\s+/);
+  const words = mnemonic.trim().split(/\s+/);
   const copy = () => {
-    navigator.clipboard?.writeText(auth.mnemonic ?? "").then(() => {
+    navigator.clipboard?.writeText(mnemonic).then(() => {
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     });
@@ -270,9 +291,10 @@ function Reveal({
         I've written my recovery phrase somewhere safe.
       </label>
 
-      <Button variant="solid" className="mt-4 w-full" onClick={onContinue} disabled={!saved}>
-        <ShieldCheck size={14} /> Save to Keychain & continue
+      <Button variant="solid" className="mt-4 w-full" onClick={onContinue} disabled={!saved || busy}>
+        {busy ? <Loader2 size={14} className="animate-spin" /> : (<><ShieldCheck size={14} /> Save to Keychain & continue</>)}
       </Button>
+      {err && <p className="mt-2 font-mono text-[11px] text-steel">{err}</p>}
     </div>
   );
 }

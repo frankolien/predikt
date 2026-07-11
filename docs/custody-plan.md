@@ -283,9 +283,9 @@ where browser wallets actually lose money — **not** our concern to hand-wave:
 - Per-pool/cup/league escrow **contract** (extend `PredictionPool`) so the operator
   only *settles*, never holds the pot. Makes "the server can't touch the pot" true too.
 
-### Layer C (future) — gasless (pairs with the winners)
-- WDK ERC-4337 smart accounts + a paymaster (`@tetherto/wdk-...-erc-4337`) so the
-  user never needs ETH — closes the second gap from the competitive read.
+### Layer C — gasless (full design in §10)
+- WDK ERC-4337 smart accounts + a paymaster so the user never needs ETH, and there's
+  no hand-refilled gas tank to run dry. Closes the second competitive gap. See §10.
 
 ---
 
@@ -320,3 +320,116 @@ where browser wallets actually lose money — **not** our concern to hand-wave:
 
 **Next:** build **M1** (lowest-risk, most demonstrable) behind the flag, verify live,
 then M2. These three answers hold until M1 is verified.
+
+---
+
+## 10. Layer C — Gasless (design)
+
+**Goal:** the fan never needs ETH, and there is **no hand-refilled gas tank to run
+dry**. Real USD₮ becomes as frictionless as points.
+
+**Why now (not theoretical):** on 2026-07-10 a real testnet send failed because the
+operator gas tank was down to **0.000656 ETH** (each auto gas-drip needs 0.002). The
+operator-funded-gas model is fragile: when it empties, *every* user's send silently
+breaks. Points sidestep it (no chain); the fix for the *real-money* path is a
+paymaster. This is also the **second competitive gap** — Mimic/La Doce/Quorum are all
+gasless (Pimlico / Candide). This closes it.
+
+### 10.1 Mechanism
+
+The fan's action becomes an **ERC-4337 UserOperation** submitted through a **bundler**,
+with a **paymaster** covering gas. Two paymaster modes, both keep "the fan never
+touches ETH":
+
+- **Gas-in-USD₮ (ERC-20 paymaster) — primary.** The paymaster takes a little of the
+  fan's *USD₮* to pay the gas. **No platform ETH at all**, so nothing can dry up, and
+  the fan only ever needs the USD₮ they already hold. (La Doce/Quorum do this via
+  Candide.) This is the one that directly kills the failure we just hit.
+- **Sponsored (verifying paymaster) — optional onboarding freebie.** The platform
+  sponsors the fan's *first* action(s) so a brand-new wallet can act on zero balance.
+  Still needs a funded paymaster, but it's a monitored service that rejects cleanly
+  when low — not a silent hand-drip. Use sparingly (first send / first buy-in), then
+  fall through to gas-in-USD₮.
+
+### 10.2 WDK integration (verified available)
+
+- Use **`@tetherto/wdk-wallet-evm-erc-4337`** (published, `1.0.0-beta.11` — the exact
+  package Quorum uses; **not yet installed** — currently we ship `wdk-wallet-evm`
+  `beta.15`, a plain EOA). This is *deeper* WDK usage, which the track rewards.
+- The signer stays the fan's seed-derived key (M1 custody is preserved — the client
+  still signs locally; only the *submission path* changes from "raw tx → our relay"
+  to "UserOp → bundler+paymaster"). The server never gains a key.
+
+### 10.3 The address-stability decision (the key call)
+
+Predikt keys identity to the wallet **address** (`users.walletAddress`). A vanilla
+ERC-4337 smart account has a **different** (counterfactual) address than the EOA, so
+switching would move every user's identity + balance. Two ways out:
+
+- **A — EIP-7702 (keep the same address).** The fan's existing EOA *delegates* to
+  smart-account code, so the address is unchanged and gains gasless powers. Mimic's
+  approach (`@tetherto/wdk` + 7702). Cleanest UX, one address across points/testnet/
+  mainnet. **Verify:** 7702 (Pectra) support on Arbitrum + WDK's 7702 API.
+- **B — Smart account as the canonical wallet (new address).** From day one on the
+  real-money path, the fan's wallet *is* the ERC-4337 smart account (deterministically
+  derived from the seed); identity keys to that address. No migration for new users;
+  existing **testnet** EOAs stay EOA (testnet is demoted to a demo toggle anyway — see
+  below), and **mainnet** uses smart accounts. Simplest to ship; matches Quorum.
+
+Recommendation: **B for mainnet now** (greenfield, no migration, ships fast), keep an
+eye on **A** to later unify addresses if 7702 on Arbitrum is solid.
+
+### 10.4 How the two money modes end up
+
+Pairs with the product reframe (Points | Real USD₮; testnet → demo toggle):
+
+| Mode | Chain | Gas | Address |
+|---|---|---|---|
+| **Points** | none | n/a (off-chain) | — |
+| **Real USD₮** | Arbitrum One | **paid in USD₮** (paymaster) | ERC-4337 smart account |
+| **Testnet (demo)** | Arbitrum Sepolia | operator-drip (kept for judges) | EOA (M1) |
+
+So the fragile drip only ever backs the *demo* toggle; the real path can't dry up.
+
+### 10.5 Components & config
+
+- **Bundler + paymaster provider** per network (Pimlico / Candide / Alchemy — pick one
+  with an Arbitrum One ERC-20 (USD₮) paymaster). API keys via env
+  (`GAFFER_BUNDLER_URL_ARBITRUM`, `GAFFER_PAYMASTER_URL_ARBITRUM`).
+- **USD₮ approval:** an ERC-20 paymaster needs an allowance to pull gas-USD₮ — batch
+  the approval into the first UserOp (AA lets you bundle approve + action).
+- **Client:** a gasless signer path in `custody.ts` (build UserOp via the WDK 4337
+  wallet → submit to the bundler). `sendUsdt` / `payBuyIn` branch: mainnet → gasless
+  UserOp; testnet → the M1 EOA relay (fallback).
+- **Server:** buy-in verify (§4.5/§5) is unchanged — it still reads the on-chain
+  Transfer(from→treasury); a UserOp settles as a normal Transfer, so `verifyDeposit`
+  just works. `/api/tx/prepare` + the operator drip stay for the testnet demo path.
+
+### 10.6 Graceful fallback
+
+If a chain/provider lacks a paymaster, or a UserOp fails, fall back to the M1
+EOA-sign→relay path (operator-drip on testnet). Gasless is **additive** on top of M1;
+custody holds either way.
+
+### 10.7 Milestones
+
+- **C1:** install `wdk-wallet-evm-erc-4337`; derive the smart-account address from the
+  seed; register identity to it (mainnet path). Read balance on the smart account.
+- **C2:** gasless **send** — build+submit a UserOp with the USD₮ paymaster (approve
+  batched); confirm zero ETH needed. Verify on Arbitrum One with a tiny amount.
+- **C3:** gasless **buy-ins** — route `payBuyIn` through the UserOp path; server verify
+  unchanged. Optional sponsored first-action.
+
+### 10.8 Open decisions
+
+1. **Paymaster provider** on Arbitrum One with a USD₮ ERC-20 paymaster (Pimlico vs
+   Candide vs Alchemy) — pick by Arbitrum + USD₮0 support.
+2. **7702 (A) vs smart-account (B)** — recommend B now; revisit A for one-address.
+3. **Sponsor the first action?** Nice onboarding touch; needs a small funded paymaster.
+4. **USD₮ vs USD₮0** on Arbitrum One as the gas + stake token (ties to §GAFFER_USDT_ADDRESS_ARBITRUM).
+
+### 10.9 Risks
+
+- 7702/AA support + WDK 4337 API maturity (beta) — verify before committing to A.
+- Paymaster provider coverage for Arbitrum One + the chosen USD₮ token.
+- ERC-20 paymaster economics (gas-USD₮ spread) — surface the tiny gas-in-USD₮ cost honestly in the UI.

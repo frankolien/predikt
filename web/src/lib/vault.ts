@@ -1,10 +1,9 @@
 /**
  * On-device seed vault — the recovery phrase encrypted at rest with the user's
  * PIN, so a returning user can re-load their signing key without re-typing 12
- * words. The seed is NEVER stored in plaintext and NEVER leaves the device
- * except transiently to the auth/restore endpoint (which re-derives the in-memory
- * signing key server-side — the same thing typing the phrase does). PIN-derived
- * AES-GCM key via PBKDF2; all through the browser's Web Crypto (no libraries).
+ * words. The seed is NEVER stored in plaintext and NEVER leaves the device — it's
+ * decrypted here only to sign locally (client-side custody); the server never sees
+ * it. PIN-derived AES-GCM key via PBKDF2; all through the browser's Web Crypto.
  *
  * Requires a secure context (https or localhost) for crypto.subtle — both our
  * hosted origin and the local demo qualify.

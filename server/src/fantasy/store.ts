@@ -426,6 +426,7 @@ export async function joinLeague(opts: {
   captainId: string;
   viceId: string;
   chip?: Chip;
+  depositTx?: string; // client-signed USD₮ buy-in (verified on-chain) for usdt leagues
 }) {
   const lg = opts.leagueId ? await row(opts.leagueId) : opts.code ? await rowByCode(opts.code) : null;
   if (!lg) throw new Error('league not found');
@@ -488,7 +489,15 @@ export async function joinLeague(opts: {
     if (lg.buyIn > 0) {
       const addr = await walletAddressOf(opts.userId);
       if (!addr) throw new Error('connect a USD₮ wallet first');
-      depositTx = await escrow.collect(addr, BigInt(lg.buyIn)); // real USD₮ → treasury (before we open a txn)
+      // The fan signed + broadcast the buy-in themselves; verify it on-chain.
+      depositTx = await escrow.verifyDeposit({
+        txHash: opts.depositTx ?? '',
+        from: addr,
+        amountBase: BigInt(lg.buyIn),
+        purpose: `league:${lg.id}`,
+        userId: opts.userId,
+        notBefore: lg.createdAt,
+      });
     }
     await db.transaction(async (tx) => writeSquad(tx, depositTx));
   } else {

@@ -8,6 +8,13 @@
       "when": 1783291026887,
       "tag": "0000_awesome_puff_adder",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1783710717838,
+      "tag": "0001_dashing_giant_man",
+      "breakpoints": true
     }
   ]
 }

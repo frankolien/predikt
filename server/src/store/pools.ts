@@ -91,6 +91,7 @@ export async function joinPool(opts: {
   userId: string;
   predHome: number;
   predAway: number;
+  depositTx?: string; // client-signed USD₮ buy-in (verified on-chain) for usdt pools
 }) {
   const pool = opts.poolId ? await poolRow(opts.poolId) : opts.code ? await poolByCode(opts.code) : null;
   if (!pool) throw new Error('pool not found');
@@ -122,7 +123,15 @@ export async function joinPool(opts: {
     if (pool.buyIn > 0) {
       const addr = await walletAddressOf(opts.userId);
       if (!addr) throw new Error('connect a USD₮ wallet first');
-      depositTx = await escrow.collect(addr, BigInt(pool.buyIn)); // real USD₮ → treasury (before we open a txn)
+      // The fan signed + broadcast the buy-in themselves; verify it on-chain.
+      depositTx = await escrow.verifyDeposit({
+        txHash: opts.depositTx ?? '',
+        from: addr,
+        amountBase: BigInt(pool.buyIn),
+        purpose: `pool:${pool.id}`,
+        userId: opts.userId,
+        notBefore: pool.createdAt,
+      });
     }
     await db.transaction(async (tx) => {
       await tx.insert(poolMembers).values({ ...entry, depositTx });

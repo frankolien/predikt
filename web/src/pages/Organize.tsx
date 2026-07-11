@@ -20,6 +20,7 @@ import { CreateCup } from "../components/organize/CreateCup";
 import { CupBracket } from "../components/organize/CupBracket";
 import { GafferDirector } from "../components/organize/GafferDirector";
 import { useApp } from "../context";
+import { payBuyInFor } from "../lib/custody";
 import { api, aiLive, type Tournament } from "../lib/api";
 import { usdt } from "../lib/format";
 import { ExplorerLink } from "../components/ExplorerLink";
@@ -95,6 +96,7 @@ function Home({
   onCreated: (t: Tournament) => void;
   refreshAccount: () => void;
 }) {
+  const { health, account: me } = useApp();
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -104,7 +106,15 @@ function Home({
     setBusy(true);
     setErr(null);
     try {
-      const t = await api.tournaments.join({ code: code.trim() });
+      // Resolve first: pay the USD₮ entry (client-signed) only if not already in.
+      const c = code.trim();
+      const existing = await api.tournaments.byCode(c);
+      if (existing.participants?.some((p) => p.userId === me?.id)) {
+        onOpen(existing);
+        return;
+      }
+      const depositTx = await payBuyInFor(health, existing.currency, existing.entryFee);
+      const t = await api.tournaments.join({ code: c, depositTx });
       refreshAccount();
       onOpen(t);
     } catch (e) {
@@ -297,7 +307,8 @@ function Detail({
           onJoin={() =>
             act("join", async () => {
               if (isUsdt && !wallet) await connectWallet(); // ensure a USD₮ wallet before paying in
-              return api.tournaments.join({ tournamentId: t.id });
+              const depositTx = await payBuyInFor(health, t.currency, t.entryFee); // client-signed USD₮ entry
+              return api.tournaments.join({ tournamentId: t.id, depositTx });
             })
           }
           onAddEntrant={(name) => act("add", () => api.tournaments.addEntrant(t.id, name))}

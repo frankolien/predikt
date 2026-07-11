@@ -3,6 +3,8 @@ import { ArrowRight, Users, Loader2 } from "lucide-react";
 import { api, type FixtureSummary, type PointsPool } from "../lib/api";
 import { Card, Eyebrow, Crest } from "./ui";
 import { usdt } from "../lib/format";
+import { useApp } from "../context";
+import { payBuyInFor } from "../lib/custody";
 
 /** Map a pool's status to a compact chip. */
 function statusChip(status: PointsPool["status"]) {
@@ -35,6 +37,7 @@ export function MyRooms({
   refreshKey?: number;
   onOpen: (fixtureId: string) => void;
 }) {
+  const { health, account } = useApp();
   const [pools, setPools] = useState<PointsPool[] | null>(null);
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
@@ -53,13 +56,12 @@ export function MyRooms({
     setBusy(true);
     setErr(null);
     try {
-      let pool: PointsPool;
-      try {
-        pool = (await api.pools.join({ code: c, prediction: { homeGoals: 1, awayGoals: 1 } })).pool;
-      } catch (e) {
-        // Already in it? Just open it. (Same happy-path as the room's join-by-code.)
-        if ((e as Error).message.toLowerCase().includes("already joined")) pool = await api.pools.byCode(c);
-        else throw e;
+      // Resolve first so we can check membership + pay a USD₮ buy-in (client-signed)
+      // only when we know the join will take — the treasury can't refund a no-op join.
+      let pool = await api.pools.byCode(c);
+      if (!pool.members?.some((m) => m.userId === account?.id)) {
+        const depositTx = await payBuyInFor(health, pool.currency, pool.buyIn);
+        pool = (await api.pools.join({ code: c, prediction: { homeGoals: 1, awayGoals: 1 }, depositTx })).pool;
       }
       setCode("");
       onOpen(pool.fixtureId); // land on that tie — you can dial in your call there

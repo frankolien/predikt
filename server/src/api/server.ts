@@ -8,8 +8,6 @@ import fastifyStatic from '@fastify/static';
 import { isAddress, isHex, type Address, type Hex } from 'viem';
 import { config } from '../config.js';
 import * as manager from '../pool/manager.js';
-import { transferUsdt } from '../wdk/wallet.js';
-import { usdt } from '../chain/client.js';
 import * as challenges from '../store/challenges.js';
 import { buildSiweMessage, verifySiwe } from '../auth/siwe.js';
 import {
@@ -98,26 +96,9 @@ export function buildApp() {
   // Your WDK recovery phrase IS your login: it derives your wallet address, and
   // the account is keyed to it — so the same phrase recovers you on any device.
 
-  // Create a brand-new wallet + account. Recovery phrase returned ONCE.
-  app.post('/api/auth/wallet/new', async (req, reply) => {
-    const { handle } = (req.body ?? {}) as { handle?: string };
-    try {
-      return await walletAuth.createWalletAccount(handle);
-    } catch (err) {
-      return reply.code(500).send({ error: (err as Error).message });
-    }
-  });
-
-  // Sign in / recover from a recovery phrase.
-  app.post('/api/auth/wallet/restore', async (req, reply) => {
-    const { mnemonic, handle } = (req.body ?? {}) as { mnemonic?: string; handle?: string };
-    if (!mnemonic || !mnemonic.trim()) return reply.code(400).send({ error: 'recovery phrase required' });
-    try {
-      return await walletAuth.signInWithMnemonic(mnemonic, handle);
-    } catch (err) {
-      return reply.code(400).send({ error: (err as Error).message });
-    }
-  });
+  // NOTE (custody): the legacy phrase-to-server endpoints (`/auth/wallet/new` +
+  // `/auth/wallet/restore`) are gone — the seed never reaches the server now.
+  // Sign-up/sign-in go through the SIWE challenge below. See docs/custody-plan.md.
 
   // ---- client-side custody auth (the seed NEVER reaches the server) ----
   // The client generates + holds the key; it proves ownership by signing a SIWE
@@ -209,37 +190,9 @@ export function buildApp() {
     };
   });
 
-  // Send USD₮ from your self-custodial wallet to any address. Gas is refuelled
-  // server-side (fan wallets hold no ETH); the transfer is signed by the WDK key.
-  app.post('/api/account/send', async (req, reply) => {
-    const a = await authed(req);
-    if (!a) return reply.code(401).send({ error: 'sign in first' });
-    const b = (req.body ?? {}) as { to?: string; amount?: number };
-    const to = (b.to ?? '').trim();
-    const amount = Number(b.amount);
-    if (!isAddress(to)) return reply.code(400).send({ error: 'Enter a valid wallet address (0x…).' });
-    if (!Number.isFinite(amount) || amount <= 0) return reply.code(400).send({ error: 'Enter an amount greater than 0.' });
-    const from = await wallets.walletAddressOf(a.id);
-    if (!from) return reply.code(400).send({ error: 'Connect your USD₮ wallet first.' });
-    if (to.toLowerCase() === from.toLowerCase()) return reply.code(400).send({ error: "That's your own address." });
-    // Send on the caller's SELECTED network (same self-custodial key, its token).
-    const { key, ctx, token } = walletCtx(req);
-    if (!token) return reply.code(400).send({ error: `USD₮ isn't available on ${ctx.network.label} yet.` });
-    const balance = await balanceOnNet(from, key, ctx);
-    if (amount > balance) return reply.code(400).send({ error: `Not enough USD₮ — your balance is ${balance}.` });
-    try {
-      // Faucet only exists on the boot chain — a switched-to network is a real
-      // wallet the user funds themselves (no minting / gas top-up off-chain).
-      if (key === BOOT_NETWORK_KEY) await manager.topUpIfLow(from as Address);
-      const { txHash } = await transferUsdt(
-        { from: from as Address, token, to: to as Address, amount: usdt(amount) },
-        ctx,
-      );
-      return { txHash, usdtHuman: await balanceOnNet(from, key, ctx), network: key };
-    } catch (err) {
-      return reply.code(500).send({ error: friendlySendError(err as Error, ctx.network.label) });
-    }
-  });
+  // NOTE (custody): `/account/send` (server-signed) is gone. The client signs its
+  // own transfer locally and relays the pre-signed raw tx via /tx/prepare + /tx/relay
+  // below — the server never holds a signing key. See docs/custody-plan.md.
 
   // ---- client-side-custody transaction relay (server broadcasts, never signs) ----
   // The client builds + signs its own tx locally; the server only supplies read-only

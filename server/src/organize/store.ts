@@ -110,7 +110,7 @@ export async function addEntrant(opts: { tournamentId: string; organizerId: stri
 }
 
 /** A user joins by code (or id) and pays the entry — points debit or real USD₮. */
-export async function joinTournament(opts: { code?: string; tournamentId?: string; userId: string }) {
+export async function joinTournament(opts: { code?: string; tournamentId?: string; userId: string; depositTx?: string }) {
   const t = opts.tournamentId ? await row(opts.tournamentId) : opts.code ? await rowByCode(opts.code) : null;
   if (!t) throw new Error('tournament not found');
   if (t.status !== 'open') throw new Error('entries are closed');
@@ -141,7 +141,15 @@ export async function joinTournament(opts: { code?: string; tournamentId?: strin
     if (t.entryFee > 0) {
       const addr = await walletAddressOf(opts.userId);
       if (!addr) throw new Error('connect a USD₮ wallet first');
-      depositTx = await escrow.collect(addr, BigInt(t.entryFee)); // real USD₮ → treasury (before we open a txn)
+      // The fan signed + broadcast the buy-in themselves; verify it on-chain.
+      depositTx = await escrow.verifyDeposit({
+        txHash: opts.depositTx ?? '',
+        from: addr,
+        amountBase: BigInt(t.entryFee),
+        purpose: `cup:${t.id}`,
+        userId: opts.userId,
+        notBefore: t.createdAt,
+      });
     }
     await db.transaction(async (tx) => {
       await tx.insert(tournamentParticipants).values({ ...entry, depositTx });

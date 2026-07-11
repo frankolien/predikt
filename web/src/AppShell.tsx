@@ -10,7 +10,7 @@ import { WalletUnlock } from "./components/WalletUnlock";
 import { DesktopOnboarding } from "./components/DesktopOnboarding";
 import { hasVault, clearVault } from "./lib/vault";
 import { keychainAvailable, keychainGet, keychainDelete, SEED_KEY } from "./lib/keychain";
-import { CLIENT_CUSTODY, signInWallet, setSessionSeed } from "./lib/custody";
+import { signInWallet, setSessionSeed } from "./lib/custody";
 
 // The desktop shell uses a left sidebar (native-app feel); the web uses the top
 // bar. Same as the checks in App.tsx / main.tsx.
@@ -222,9 +222,9 @@ export function AppShell() {
   // keep the seed in session memory so this device can sign its own transactions.
   const restoreAccount = useCallback(
     async (mnemonic: string) => {
-      const r = CLIENT_CUSTODY ? await signInWallet(mnemonic) : await api.auth.restore(mnemonic);
+      const r = await signInWallet(mnemonic); // SIWE challenge — the seed never leaves the device
       commitAuth(r);
-      if (CLIENT_CUSTODY) setSessionSeed(mnemonic);
+      setSessionSeed(mnemonic); // hold it in session memory so this device can sign its own txs
       return r.account;
     },
     [commitAuth],
