@@ -23,6 +23,14 @@ import type { Address } from "viem";
 import type { NetworkInfo } from "./api";
 import * as signer from "./signer";
 
+/** Public node RPC per chain for ERC-4337 read calls (eth_call/nonce). The Candide
+ *  bundler endpoint does NOT serve these, so createUserOperation must read from a
+ *  real node, not the bundler. Public endpoints — no keys. */
+const NODE_RPC: Record<number, string> = {
+  42161: "https://arb1.arbitrum.io/rpc", // Arbitrum One
+  421614: "https://sepolia-rollup.arbitrum.io/rpc", // Arbitrum Sepolia
+};
+
 /** Everything the gasless path needs, resolved from the active network's health. */
 export interface GaslessConfig {
   bundler: string; // ERC-4337 bundler RPC (Candide)
@@ -74,10 +82,13 @@ export async function sendUsdtGasless(
     data: signer.erc20TransferData(to, signer.usdtBase(amountHuman)),
   };
 
-  // 1. Build the UserOp. On the FIRST op the EOA isn't yet delegated, so we attach +
-  //    sign an EIP-7702 delegation authorization (locally, with the fan's key); once
-  //    delegated, createUserOperation returns a null auth and we skip it.
-  let userOp = await account.createUserOperation([transfer], cfg.bundler, cfg.bundler, {
+  // 1. Build the UserOp. createUserOperation reads the EntryPoint nonce via eth_call,
+  //    which BUNDLERS don't serve — so provider reads must go to a real node RPC, not
+  //    cfg.bundler (that mismatch is what made every gasless buy-in fail). On the FIRST
+  //    op the EOA isn't yet delegated, so we attach + sign an EIP-7702 delegation
+  //    authorization locally; once delegated, createUserOperation returns a null auth.
+  const nodeRpc = NODE_RPC[cfg.chainId] ?? cfg.bundler;
+  let userOp = await account.createUserOperation([transfer], nodeRpc, cfg.bundler, {
     eip7702Auth: { chainId },
   });
   if (userOp.eip7702Auth) {

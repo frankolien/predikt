@@ -63,10 +63,12 @@ export async function verifyDeposit(opts: {
   if (!/^0x[0-9a-fA-F]{64}$/.test(txHash)) throw new Error('a signed USD₮ deposit is required to join');
   const hash = txHash as Hex;
 
-  // 1. the deposit tx must exist on-chain and have succeeded
+  // 1. the deposit tx must exist on-chain and have succeeded. The client relays the
+  //    deposit and joins immediately, so our RPC can be a beat behind the bundler —
+  //    poll for the receipt (don't fail on the first miss) to absorb propagation lag.
   let receipt;
   try {
-    receipt = await publicClient.getTransactionReceipt({ hash });
+    receipt = await publicClient.waitForTransactionReceipt({ hash, timeout: 20_000, pollingInterval: 1_500 });
   } catch {
     throw new Error('deposit not found on-chain yet — give it a moment and retry');
   }
