@@ -17,6 +17,7 @@ import { Onboard } from "../components/Onboard";
 import { BootScreen } from "../components/BootScreen";
 import { SquadBuilder, type SquadState } from "../components/fantasy/SquadBuilder";
 import { FantasyPitch } from "../components/fantasy/FantasyPitch";
+import { RoomChat } from "../components/RoomChat";
 import { useApp } from "../context";
 import { payBuyInFor } from "../lib/custody";
 import { api, type FantasyLeague, type FantasyStanding } from "../lib/api";
@@ -457,6 +458,12 @@ function LeagueDetail({
           </div>
         )}
       </Card>
+
+      {(me || isCreator) && (
+        <div className="mt-5">
+          <RoomChat kind="league" id={lg.id} meId={meId} />
+        </div>
+      )}
     </div>
   );
 }

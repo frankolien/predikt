@@ -1,18 +1,19 @@
 import { useEffect, useRef, useState } from "react";
 import { Send } from "lucide-react";
-import { api, streamPoolChat, type ChatMessage } from "../lib/api";
+import { api, streamRoomChat, type ChatMessage, type RoomKind } from "../lib/api";
 import { Avatar, Card, Eyebrow, LiveDot } from "./ui";
 import { cn } from "../lib/cn";
 
 const time = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
 /**
- * Live room chat for a pool — the people who staked this tie, talking in real time.
- * History loads once; new messages arrive over an SSE stream (including the sender's
- * own echo from the server, so every client renders the SAME canonical copy). Membership
- * is enforced server-side; a non-member's history fetch 403s and we render nothing.
+ * Live group chat for a room — a pool, a cup, or a fantasy league. The people who joined
+ * this room, talking in real time. History loads once; new messages arrive over an SSE
+ * stream (including the sender's own echo from the server, so every client renders the
+ * SAME canonical copy). Membership is enforced server-side; a non-member's history fetch
+ * 403s and we render nothing. One component, dropped into all three room views.
  */
-export function RoomChat({ poolId, meId }: { poolId: string; meId?: string }) {
+export function RoomChat({ kind, id, meId }: { kind: RoomKind; id: string; meId?: string }) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [text, setText] = useState("");
   const [gated, setGated] = useState(false);
@@ -32,17 +33,17 @@ export function RoomChat({ poolId, meId }: { poolId: string; meId?: string }) {
     let live = true;
     setMessages([]);
     setGated(false);
-    api.pools.chat
-      .list(poolId)
+    api.rooms.chat
+      .list(kind, id)
       .then((r) => live && setMessages(r.messages))
       .catch(() => live && setGated(true)); // not a member (403) → no chat surface
-    const stop = streamPoolChat(poolId, (m) => merge([m]));
+    const stop = streamRoomChat(kind, id, (m) => merge([m]));
     return () => {
       live = false;
       stop();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [poolId]);
+  }, [kind, id]);
 
   // Stick to the newest message.
   useEffect(() => {
@@ -55,7 +56,7 @@ export function RoomChat({ poolId, meId }: { poolId: string; meId?: string }) {
     if (!body || sending) return;
     setSending(true);
     try {
-      const { message } = await api.pools.chat.send(poolId, body);
+      const { message } = await api.rooms.chat.send(kind, id, body);
       merge([message]);
       setText(""); // keep the text on failure so nothing is lost
     } catch {

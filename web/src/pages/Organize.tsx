@@ -18,6 +18,7 @@ import { Onboard } from "../components/Onboard";
 import { BootScreen } from "../components/BootScreen";
 import { CreateCup } from "../components/organize/CreateCup";
 import { CupBracket } from "../components/organize/CupBracket";
+import { RoomChat } from "../components/RoomChat";
 import { GafferDirector } from "../components/organize/GafferDirector";
 import { useApp } from "../context";
 import { payBuyInFor } from "../lib/custody";
@@ -212,7 +213,7 @@ function Detail({
   onChange: (t: Tournament) => void;
   onBack: () => void;
 }) {
-  const { wallet, connectWallet, health } = useApp();
+  const { wallet, connectWallet, health, account } = useApp();
   const [busy, setBusy] = useState<string | null>(null);
   const [reporting, setReporting] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -347,6 +348,12 @@ function Detail({
           </Card>
 
           {t.status === "completed" && <Payouts t={t} money={money} />}
+        </div>
+      )}
+
+      {(isParticipant || isOrganizer) && (
+        <div className="mt-5">
+          <RoomChat kind="cup" id={t.id} meId={account?.id} />
         </div>
       )}
     </div>

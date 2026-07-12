@@ -343,25 +343,35 @@ export function buildApp() {
     return { pools: await store.poolsForUser(a.id) };
   });
 
-  // ---- room chat — live messages inside a pool, members only ----
+  // ---- room chat — live group chat in a pool / cup / league, members only ----
+  // One set of routes for all three room families: `:kind` ∈ pool|cup|league, `:id` is
+  // the entity id. Membership (who may read/post) is resolved per-kind in the store.
+
+  const chatRoom = (req: { params: unknown }): { kind: chat.RoomKind; id: string; room: string } | null => {
+    const { kind, id } = req.params as { kind: string; id: string };
+    return chat.isRoomKind(kind) ? { kind, id, room: chat.roomKey(kind, id) } : null;
+  };
 
   // Recent history (oldest→newest) to prime the panel on open.
-  app.get('/api/pools/:id/chat', async (req, reply) => {
+  app.get('/api/rooms/:kind/:id/chat', async (req, reply) => {
     const a = await authed(req);
     if (!a) return reply.code(401).send({ error: 'sign in first' });
-    const { id } = req.params as { id: string };
-    if (!(await chat.isMember(id, a.id))) return reply.code(403).send({ error: 'join the room to chat' });
-    return { messages: await chat.recentMessages(id, 50) };
+    const r = chatRoom(req);
+    if (!r) return reply.code(404).send({ error: 'unknown room' });
+    if (!(await chat.canChat(r.kind, r.id, a.id))) return reply.code(403).send({ error: 'join the room to chat' });
+    return { messages: await chat.recentMessages(r.room, 50) };
   });
 
   // Post a message — persisted + fanned out to every live subscriber.
-  app.post('/api/pools/:id/chat', async (req, reply) => {
+  app.post('/api/rooms/:kind/:id/chat', async (req, reply) => {
     const a = await authed(req);
     if (!a) return reply.code(401).send({ error: 'sign in first' });
-    const { id } = req.params as { id: string };
+    const r = chatRoom(req);
+    if (!r) return reply.code(404).send({ error: 'unknown room' });
+    if (!(await chat.canChat(r.kind, r.id, a.id))) return reply.code(403).send({ error: 'join the room to chat' });
     const b = (req.body ?? {}) as { body?: string };
     try {
-      return { message: await chat.postMessage({ poolId: id, userId: a.id, body: b.body }) };
+      return { message: await chat.postMessage({ room: r.room, userId: a.id, body: b.body }) };
     } catch (err) {
       return reply.code(400).send({ error: (err as Error).message });
     }
@@ -369,11 +379,11 @@ export function buildApp() {
 
   // Live push (SSE). EventSource can't set headers, so the session token rides the
   // query string (like the organize/fantasy AI streams) — still membership-gated.
-  app.get('/api/pools/:id/chat/stream', async (req, reply) => {
-    const { id } = req.params as { id: string };
+  app.get('/api/rooms/:kind/:id/chat/stream', async (req, reply) => {
     const token = (req.query as { token?: string })?.token;
     const a = await accounts.accountFromToken(token);
-    if (!a || !(await chat.isMember(id, a.id))) {
+    const r = chatRoom(req);
+    if (!a || !r || !(await chat.canChat(r.kind, r.id, a.id))) {
       reply.code(403).send({ error: 'join the room to chat' });
       return;
     }
@@ -386,7 +396,7 @@ export function buildApp() {
       'Access-Control-Allow-Origin': '*',
     });
     const send = (obj: unknown) => raw.write(`data: ${JSON.stringify(obj)}\n\n`);
-    const unsub = chat.subscribe(id, (m) => send({ type: 'message', message: m }));
+    const unsub = chat.subscribe(r.room, (m) => send({ type: 'message', message: m }));
     // Keep proxies/browsers from idling the connection out.
     const hb = setInterval(() => raw.write(': ping\n\n'), 25_000);
     const close = () => {

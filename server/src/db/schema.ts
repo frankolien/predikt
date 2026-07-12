@@ -88,15 +88,19 @@ export const poolMembers = pgTable(
   }),
 );
 
-/** Live chat for a pool room — one row per message, streamed to members in real time.
- *  Text-only; sender identity (handle/avatar) is joined from `users` at read time. */
-export const poolMessages = pgTable(
-  'pool_messages',
+/**
+ * Live group chat for ANY room — a pool, a cup, or a fantasy league. One table for all
+ * three: `room` is a namespaced key `pool:<id>` | `cup:<id>` | `league:<id>` (the same
+ * convention the escrow uses for deposit purposes), so chat generalises without a table
+ * per product. Membership (who may read/post) is enforced per-kind in the store against
+ * poolMembers / tournamentParticipants / fantasySquads. Text-only; sender identity
+ * (handle/avatar) is joined from `users` at read time.
+ */
+export const roomMessages = pgTable(
+  'room_messages',
   {
     id: text('id').primaryKey(),
-    poolId: text('pool_id')
-      .notNull()
-      .references(() => pools.id),
+    room: text('room').notNull(), // 'pool:<id>' | 'cup:<id>' | 'league:<id>'
     userId: text('user_id')
       .notNull()
       .references(() => users.id),
@@ -104,8 +108,8 @@ export const poolMessages = pgTable(
     createdAt: ts('created_at').notNull(),
   },
   (t) => ({
-    // (pool, time) — fetch a room's recent messages in order without a sort.
-    poolIdx: index('pool_messages_pool_idx').on(t.poolId, t.createdAt),
+    // (room, time) — fetch a room's recent messages in order without a sort.
+    roomIdx: index('room_messages_room_idx').on(t.room, t.createdAt),
   }),
 );
 

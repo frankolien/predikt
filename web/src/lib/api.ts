@@ -216,10 +216,13 @@ export interface PointsPool {
   members: PoolMemberView[];
 }
 
+/** The three room families that can host a group chat. */
+export type RoomKind = "pool" | "cup" | "league";
+
 /** A room-chat message (server-denormalized with the sender's identity). */
 export interface ChatMessage {
   id: string;
-  poolId: string;
+  room: string; // 'pool:<id>' | 'cup:<id>' | 'league:<id>'
   userId: string;
   handle: string;
   avatar: string | null;
@@ -527,9 +530,13 @@ export const api = {
     leave: (id: string) => post<{ pool: PointsPool | null; account: Account }>(`/pools/${id}/leave`, {}),
     mine: () => get<{ pools: PointsPool[] }>("/me/pools"),
     forFixture: (fixtureId: string) => get<{ pools: PointsPool[] }>(`/fixtures/${fixtureId}/pools`),
+  },
+
+  // ---- room chat — group chat in any room (pool / cup / league), members only ----
+  rooms: {
     chat: {
-      list: (poolId: string) => get<{ messages: ChatMessage[] }>(`/pools/${poolId}/chat`),
-      send: (poolId: string, body: string) => post<{ message: ChatMessage }>(`/pools/${poolId}/chat`, { body }),
+      list: (kind: RoomKind, id: string) => get<{ messages: ChatMessage[] }>(`/rooms/${kind}/${id}/chat`),
+      send: (kind: RoomKind, id: string, body: string) => post<{ message: ChatMessage }>(`/rooms/${kind}/${id}/chat`, { body }),
     },
   },
 
@@ -649,15 +656,15 @@ export function streamFixtures(onFixtures: (fixtures: FixtureSummary[]) => void)
 }
 
 /**
- * Live room-chat push. One EventSource per open room; the session token rides the
- * query string because EventSource can't set headers (the server still gates on it +
- * membership). Returns a cleanup fn; EventSource auto-reconnects, so we don't close on
- * error. New messages (including the sender's own echo) arrive here.
+ * Live room-chat push for any room (pool / cup / league). One EventSource per open room;
+ * the session token rides the query string because EventSource can't set headers (the
+ * server still gates on it + membership). Returns a cleanup fn; EventSource auto-reconnects,
+ * so we don't close on error. New messages (including the sender's own echo) arrive here.
  */
-export function streamPoolChat(poolId: string, onMessage: (m: ChatMessage) => void): () => void {
+export function streamRoomChat(kind: RoomKind, id: string, onMessage: (m: ChatMessage) => void): () => void {
   const t = getToken();
   const qs = t ? `?token=${encodeURIComponent(t)}` : "";
-  const es = new EventSource(`${API_BASE}/api/pools/${poolId}/chat/stream${qs}`);
+  const es = new EventSource(`${API_BASE}/api/rooms/${kind}/${id}/chat/stream${qs}`);
   es.onmessage = (msg) => {
     try {
       const data = JSON.parse(msg.data) as { type: string; message?: ChatMessage };

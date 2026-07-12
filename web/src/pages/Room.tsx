@@ -156,7 +156,7 @@ export default function Room() {
           {fixture && <Scorebug fixture={fixture} />}
           {fixture && isLive && showAi && <LiveReaction fixtureId={fixture.id} scoreKey={scoreKey} />}
           {activePool && <PoolStandings pool={activePool} fixture={fixture} meId={account?.id} />}
-          {activePool && account && <RoomChat poolId={activePool.id} meId={account.id} />}
+          {activePool && account && <RoomChat kind="pool" id={activePool.id} meId={account.id} />}
           <Leaderboard meId={account?.id} refreshKey={lbKey} />
         </div>
 
