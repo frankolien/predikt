@@ -26,19 +26,40 @@ export function DesktopOnboarding({ onClose }: { onClose: () => void }) {
   // Force the ambient loop to play in the WKWebView: React doesn't reliably apply
   // the muted/loop props to the DOM element, and WKWebView blocks autoplay unless
   // the element is already muted when play() is called. Retry as the data lands.
+  //
+  // WKWebView also PAUSES a looping video after a while (loop hiccups, app
+  // backgrounding, power/Low-Power-Mode events) and never resumes it on its own — so
+  // the ambient loop dies mid-onboarding. Keep it alive belt-and-suspenders: replay on
+  // end, resume when the window becomes visible, and a low-frequency watchdog that
+  // restarts it whenever it's found paused.
   useEffect(() => {
     const v = videoRef.current;
     if (!v) return;
     v.muted = true;
     v.defaultMuted = true;
     v.loop = true;
-    const play = () => v.play().catch(() => {});
+    const play = () => {
+      if (v.paused) v.play().catch(() => {});
+    };
+    const onEnded = () => {
+      v.currentTime = 0; // in case WKWebView drops the loop
+      play();
+    };
+    const onVisible = () => {
+      if (!document.hidden) play();
+    };
     play();
     v.addEventListener("loadeddata", play);
     v.addEventListener("canplay", play);
+    v.addEventListener("ended", onEnded);
+    document.addEventListener("visibilitychange", onVisible);
+    const watchdog = window.setInterval(play, 2000); // catch-all: resume any unexpected pause
     return () => {
       v.removeEventListener("loadeddata", play);
       v.removeEventListener("canplay", play);
+      v.removeEventListener("ended", onEnded);
+      document.removeEventListener("visibilitychange", onVisible);
+      clearInterval(watchdog);
     };
   }, []);
   const [handle, setHandle] = useState("");
