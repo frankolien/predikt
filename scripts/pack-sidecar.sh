@@ -140,10 +140,12 @@ ENT="$ROOT/web/src-tauri/entitlements.plist"
 sign_macho() {
   local f="$1"
   if [ -n "${APPLE_SIGNING_IDENTITY:-}" ]; then
+    # stderr is NOT suppressed: with set -e a codesign failure aborts the build, so the
+    # reason (e.g. identity not found, keychain locked, timestamp unreachable) must show.
     codesign --force --timestamp --options runtime --entitlements "$ENT" \
-      --sign "$APPLE_SIGNING_IDENTITY" "$f" 2>/dev/null
+      --sign "$APPLE_SIGNING_IDENTITY" "$f" || { echo "   ✗ codesign failed on $f (identity: $APPLE_SIGNING_IDENTITY)"; exit 1; }
   else
-    codesign --force --sign - "$f" 2>/dev/null # adhoc (local only)
+    codesign --force --sign - "$f" # adhoc (local only)
   fi
 }
 # Leaves first (addons + dylib), then the node executable that loads them.
