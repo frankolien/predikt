@@ -102,8 +102,14 @@ export function PoolHub({
   // which the server verifies on-chain. Since the treasury can't auto-refund a
   // doomed join (Layer B), we only deposit once we know the join will take —
   // fresh pool (create), or a pool we've confirmed is open + we're not already in.
+  // The kickoff guard is part of that: once the tie has kicked off the server rejects
+  // the join as "locked", so we must NOT take the (unrefundable) deposit first. The
+  // `fixture` prop is live-streamed, so its status reflects the current lock state.
+  const kickedOff = () => fixture.status !== "scheduled";
+  const LOCKED = "This tie has kicked off — calls are locked.";
   const createAndJoin = () =>
     wrap(async () => {
+      if (kickedOff()) throw new Error(LOCKED); // guard before creating the pool + depositing
       const pool = await api.pools.create(fixture.id, { name: name.trim() || undefined, buyIn, isPublic: true, currency });
       const depositTx = await payBuyInFor(health, currency, buyIn);
       return (await api.pools.join({ poolId: pool.id, prediction, depositTx })).pool;
@@ -111,14 +117,16 @@ export function PoolHub({
   const joinByCode = () =>
     wrap(async () => {
       const c = code.trim();
-      const pool = await api.pools.byCode(c); // resolve first: check currency + membership before paying
+      const pool = await api.pools.byCode(c); // resolve first: check status + membership before paying
       if (pool.members?.some((m) => m.userId === account?.id)) return pool; // already in — just open it
+      if (pool.status !== "open") throw new Error(LOCKED); // its own (possibly different) fixture has locked
       const depositTx = await payBuyInFor(health, pool.currency, pool.buyIn);
       return (await api.pools.join({ code: c, prediction, depositTx })).pool;
     });
   const joinPublic = (p: PointsPool) =>
     wrap(async () => {
       if (p.members?.some((m) => m.userId === account?.id)) return p; // already in — open it, don't re-pay
+      if (kickedOff() || p.status !== "open") throw new Error(LOCKED); // don't deposit into a locked tie
       const depositTx = await payBuyInFor(health, p.currency, p.buyIn);
       return (await api.pools.join({ poolId: p.id, prediction, depositTx })).pool;
     });
