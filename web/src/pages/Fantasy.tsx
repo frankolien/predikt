@@ -423,8 +423,10 @@ function LeagueDetail({
         </Reveal>
       )}
 
-      {/* standings */}
-      <Card className="mt-6 p-5">
+      {/* standings + room chat — side by side once you're in the league (a row, so the
+          chat sits next to the table instead of below it); full-width table otherwise */}
+      <div className={`mt-6 grid items-start gap-5 ${me || isCreator ? "lg:grid-cols-2" : ""}`}>
+        <Card className="p-5">
         <div className="mb-3 flex items-center justify-between">
           <Eyebrow>standings · by score</Eyebrow>
           {lg.status === "live" && lg.scoringStarted !== false && (
@@ -457,13 +459,9 @@ function LeagueDetail({
             ))}
           </div>
         )}
-      </Card>
-
-      {(me || isCreator) && (
-        <div className="mt-5">
-          <RoomChat kind="league" id={lg.id} meId={meId} />
-        </div>
-      )}
+        </Card>
+        {(me || isCreator) && <RoomChat kind="league" id={lg.id} meId={meId} />}
+      </div>
     </div>
   );
 }
