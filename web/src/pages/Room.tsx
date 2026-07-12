@@ -151,13 +151,11 @@ export default function Room() {
 
       {fixture && health?.mode === "local" && <LiveSimControls fixture={fixture} onChanged={refreshFixtures} />}
 
-      <div className="mt-6 grid gap-5 lg:grid-cols-[1.05fr_0.95fr]">
+      {/* Top: the match + join / your entry */}
+      <div className="mt-6 grid items-start gap-5 lg:grid-cols-[1.05fr_0.95fr]">
         <div className="space-y-5">
           {fixture && <Scorebug fixture={fixture} />}
           {fixture && isLive && showAi && <LiveReaction fixtureId={fixture.id} scoreKey={scoreKey} />}
-          {activePool && <PoolStandings pool={activePool} fixture={fixture} meId={account?.id} />}
-          {activePool && account && <RoomChat kind="pool" id={activePool.id} meId={account.id} />}
-          <Leaderboard meId={account?.id} refreshKey={lbKey} />
         </div>
 
         <div className="space-y-5">
@@ -198,6 +196,22 @@ export default function Room() {
                 </p>
               </Card>
             ))}
+        </div>
+      </div>
+
+      {/* The room: live standings + chat SIDE BY SIDE — a row, so the chat sits right
+          next to the table instead of hiding below it. Stacks on mobile. */}
+      {activePool && account && (
+        <div className="mt-5 grid items-start gap-5 lg:grid-cols-2">
+          <PoolStandings pool={activePool} fixture={fixture} meId={account.id} />
+          <RoomChat kind="pool" id={activePool.id} meId={account.id} />
+        </div>
+      )}
+
+      {/* Below: global leaderboard + your other rooms */}
+      <div className="mt-5 grid items-start gap-5 lg:grid-cols-[1.05fr_0.95fr]">
+        <Leaderboard meId={account?.id} refreshKey={lbKey} />
+        <div className="space-y-5">
           {account && (
             <MyRooms
               fixtures={fixtures}
