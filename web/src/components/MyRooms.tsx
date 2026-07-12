@@ -15,6 +15,7 @@ function statusChip(status: PointsPool["status"]) {
 
 function friendly(msg: string): string {
   const m = (msg || "").toLowerCase();
+  if (m.includes("usdt_gas_shortfall")) return msg.split("|").slice(1).join("|").trim() || "Add a little USD₮ to cover network gas, then try again.";
   if (m.includes("not found") || m.includes("no pool")) return "No pool with that code.";
   if (m.includes("locked")) return "That tie has kicked off — calls are closed.";
   if (m.includes("sign in")) return "Sign in first.";

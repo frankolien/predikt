@@ -101,24 +101,39 @@ export async function payBuyIn(opts: {
   if (!opts.usdtToken || !opts.treasury) throw new Error("The USD₮ rail isn't ready — try again in a moment.");
   const seed = await ensureSessionSeed();
 
+  // M1 EOA-sign→relay: the fan signs a raw USD₮ transfer to the treasury and the server
+  // broadcasts it. This path pays gas in ETH, so it only works where the fan HAS ETH
+  // (faucet/testnet) — on a gasless mainnet it's a last-ditch fallback, not the norm.
+  const relayViaM1 = async (): Promise<string> => {
+    const from = signer.addressFromMnemonic(seed);
+    const data = signer.erc20TransferData(opts.treasury as Address, signer.usdtBase(opts.buyInHuman));
+    const prep = await api.tx.prepare(from, opts.usdtToken as string, data, opts.bootNet);
+    const rawTx = await signer.signTx(seed, { to: opts.usdtToken as Address, data }, prep);
+    const { hash } = await api.tx.relay(rawTx, opts.bootNet);
+    return hash;
+  };
+
   // Layer C — gasless: build the stake as a UserOp (fan needs no ETH). The paymaster
   // settles it as a normal USD₮ Transfer → the server's verifyDeposit is unchanged.
-  // On any failure fall through to the M1 EOA-sign→relay path (additive, §10.6).
   if (opts.gasless) {
     try {
       const { hash } = await sendUsdtGasless(seed, opts.treasury as Address, opts.buyInHuman, opts.gasless);
       return hash;
-    } catch (e) {
-      console.warn("gasless buy-in failed, falling back to EOA relay:", e);
+    } catch (gaslessErr) {
+      // Gasless IS the path on a paymaster network; M1 below needs ETH the fan doesn't
+      // have, so it only helps on faucet/testnet chains. Try it, but if it ALSO fails,
+      // surface the (actionable) gasless error — e.g. "add a few cents of USD₮ for gas"
+      // — never M1's misleading "insufficient funds for gas" (which implies "just wait").
+      console.warn("gasless buy-in failed, trying EOA relay:", gaslessErr);
+      try {
+        return await relayViaM1();
+      } catch {
+        throw gaslessErr;
+      }
     }
   }
 
-  const from = signer.addressFromMnemonic(seed);
-  const data = signer.erc20TransferData(opts.treasury as Address, signer.usdtBase(opts.buyInHuman));
-  const prep = await api.tx.prepare(from, opts.usdtToken, data, opts.bootNet);
-  const rawTx = await signer.signTx(seed, { to: opts.usdtToken as Address, data }, prep);
-  const { hash } = await api.tx.relay(rawTx, opts.bootNet);
-  return hash;
+  return relayViaM1();
 }
 
 /**

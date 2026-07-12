@@ -13,6 +13,9 @@ const USDT_BUYINS = [1, 5, 10, 25];
 function friendly(msg: string): string {
   const m = (msg || "").toLowerCase();
   if (m.includes("unknown fan wallet") || m.includes("warming up")) return "Unlock your wallet with your PIN to stake real USD₮.";
+  // Fan holds the stake but not the few cents of USD₮ gas on top — actionable, and NOT
+  // fixed by waiting (must come before the generic "gas" branch, which its text matches).
+  if (m.includes("usdt_gas_shortfall")) return msg.split("|").slice(1).join("|").trim() || "Add a little USD₮ to cover network gas, then try again.";
   // On-chain gas failure — the wallet has USD₮ but no ETH to move it. NOT a points issue.
   if (m.includes("insufficient funds") || m.includes("gas")) return "The USD₮ rail is topping up gas — give it a few seconds and try again.";
   if (m.includes("exceeds balance") || m.includes("transfer amount")) return "Not enough USD₮ in your wallet for that buy-in.";

@@ -19,7 +19,7 @@
  *
  * See docs/custody-plan.md §10.
  */
-import type { Address } from "viem";
+import { createPublicClient, http, type Address } from "viem";
 import type { NetworkInfo } from "./api";
 import * as signer from "./signer";
 
@@ -29,6 +29,29 @@ import * as signer from "./signer";
 const NODE_RPC: Record<number, string> = {
   42161: "https://arb1.arbitrum.io/rpc", // Arbitrum One
   421614: "https://sepolia-rollup.arbitrum.io/rpc", // Arbitrum Sepolia
+};
+
+const BALANCE_OF_ABI = [
+  { type: "function", name: "balanceOf", stateMutability: "view", inputs: [{ name: "a", type: "address" }], outputs: [{ type: "uint256" }] },
+] as const;
+
+/**
+ * Marker prefix on the error thrown when the fan can't cover the stake PLUS the ~gas
+ * the USD₮ paymaster pulls (gas is paid in USD₮, on top of the stake). The UI's error
+ * mapper shows the human half (after "|") verbatim. This is the common "I have exactly
+ * 1 USD₮ and the room is 1 USD₮" failure — the paymaster refuses because there's
+ * nothing left for gas, and the fix is "hold a few cents more", not "wait".
+ */
+export const GAS_SHORTFALL = "USDT_GAS_SHORTFALL";
+
+/** USD₮ headroom the paymaster needs on top of the stake (observed gas ≈ 0.014 USD₮). */
+const GAS_HEADROOM_BASE = 20_000n; // 0.02 USD₮
+const shortfall = (stakeHuman: number, haveBase?: bigint): Error => {
+  const have = haveBase == null ? "" : ` You have $${(Number(haveBase) / 1e6).toFixed(2)}.`;
+  return new Error(
+    `${GAS_SHORTFALL}|Add a little USD₮ to join. A $${stakeHuman} room needs about $${(stakeHuman + 0.05).toFixed(2)} — ` +
+      `the few cents on top of your stake cover network gas (paid in USD₮).${have}`,
+  );
 };
 
 /** Everything the gasless path needs, resolved from the active network's health. */
@@ -76,18 +99,33 @@ export async function sendUsdtGasless(
   // EntryPoint v0.9 — Candide's Arbitrum bundler rejects v0.8 7702 ops (opaque
   // SIMULATE_VALIDATION error) but accepts v0.9; verified live on Arbitrum One.
   const account = new Simple7702AccountV09(owner);
+  const stakeBase = signer.usdtBase(amountHuman);
   const transfer = {
     to: cfg.usdt,
     value: 0n,
-    data: signer.erc20TransferData(to, signer.usdtBase(amountHuman)),
+    data: signer.erc20TransferData(to, stakeBase),
   };
+
+  // Pre-flight: the USD₮ paymaster pulls gas from the fan's OWN USD₮, so they need a
+  // little MORE than the stake. Check up front for a clear, actionable message instead
+  // of the paymaster's opaque "token balance lower than the required allowance". This
+  // is the "exactly 1 USD₮ in a 1 USD₮ room" case. Best-effort — if the read itself
+  // fails we proceed and let the paymaster be the gate (below).
+  const nodeRpc = NODE_RPC[cfg.chainId] ?? cfg.bundler;
+  try {
+    const pub = createPublicClient({ transport: http(nodeRpc) });
+    const bal = (await pub.readContract({ address: cfg.usdt, abi: BALANCE_OF_ABI, functionName: "balanceOf", args: [owner] })) as bigint;
+    if (bal < stakeBase + GAS_HEADROOM_BASE) throw shortfall(amountHuman, bal);
+  } catch (e) {
+    if ((e as Error)?.message?.startsWith(GAS_SHORTFALL)) throw e; // a real shortfall — surface it
+    // otherwise the balance read failed — ignore and let the paymaster gate it
+  }
 
   // 1. Build the UserOp. createUserOperation reads the EntryPoint nonce via eth_call,
   //    which BUNDLERS don't serve — so provider reads must go to a real node RPC, not
   //    cfg.bundler (that mismatch is what made every gasless buy-in fail). On the FIRST
   //    op the EOA isn't yet delegated, so we attach + sign an EIP-7702 delegation
   //    authorization locally; once delegated, createUserOperation returns a null auth.
-  const nodeRpc = NODE_RPC[cfg.chainId] ?? cfg.bundler;
   let userOp = await account.createUserOperation([transfer], nodeRpc, cfg.bundler, {
     eip7702Auth: { chainId },
   });
@@ -104,7 +142,17 @@ export async function sendUsdtGasless(
   //    the fan's USD₮ (the approve is batched in) — no ETH anywhere, nothing to run
   //    dry. `tokenQuote` is the USD₮ gas cost, surfaced honestly in the UI (§10.9).
   const paymaster = new CandidePaymaster(cfg.paymaster);
-  const sponsored = await paymaster.createTokenPaymasterUserOperation(account, userOp, cfg.usdt, cfg.bundler);
+  let sponsored;
+  try {
+    sponsored = await paymaster.createTokenPaymasterUserOperation(account, userOp, cfg.usdt, cfg.bundler);
+  } catch (e) {
+    // Backstop for the pre-flight (e.g. a gas spike after the balance read): the
+    // paymaster refuses with "token balance lower than the required allowance" when
+    // the fan's USD₮ can't cover gas. Turn that into the same actionable shortfall.
+    const m = (e as Error)?.message?.toLowerCase() ?? "";
+    if (m.includes("token balance") || m.includes("allowance") || m.includes("getpaymasterdata")) throw shortfall(amountHuman);
+    throw e;
+  }
   userOp = sponsored.userOperation;
 
   // 3. Sign LOCALLY (userOpHash) — the key never leaves here.
