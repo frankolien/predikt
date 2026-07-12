@@ -15,6 +15,13 @@
       "when": 1783710717838,
       "tag": "0001_dashing_giant_man",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1783819439654,
+      "tag": "0002_magenta_night_nurse",
+      "breakpoints": true
     }
   ]
 }

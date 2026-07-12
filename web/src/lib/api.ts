@@ -216,6 +216,17 @@ export interface PointsPool {
   members: PoolMemberView[];
 }
 
+/** A room-chat message (server-denormalized with the sender's identity). */
+export interface ChatMessage {
+  id: string;
+  poolId: string;
+  userId: string;
+  handle: string;
+  avatar: string | null;
+  body: string;
+  createdAt: string; // ISO
+}
+
 // ---- Organize: knockout tournaments ----
 
 export interface TournamentParticipantView {
@@ -516,6 +527,10 @@ export const api = {
     leave: (id: string) => post<{ pool: PointsPool | null; account: Account }>(`/pools/${id}/leave`, {}),
     mine: () => get<{ pools: PointsPool[] }>("/me/pools"),
     forFixture: (fixtureId: string) => get<{ pools: PointsPool[] }>(`/fixtures/${fixtureId}/pools`),
+    chat: {
+      list: (poolId: string) => get<{ messages: ChatMessage[] }>(`/pools/${poolId}/chat`),
+      send: (poolId: string, body: string) => post<{ message: ChatMessage }>(`/pools/${poolId}/chat`, { body }),
+    },
   },
 
   // ---- Organize: knockout tournaments ----
@@ -626,6 +641,27 @@ export function streamFixtures(onFixtures: (fixtures: FixtureSummary[]) => void)
     try {
       const data = JSON.parse(msg.data) as { type: string; fixtures?: FixtureSummary[] };
       if (data.fixtures?.length) onFixtures(data.fixtures);
+    } catch {
+      /* ignore keep-alives */
+    }
+  };
+  return () => es.close();
+}
+
+/**
+ * Live room-chat push. One EventSource per open room; the session token rides the
+ * query string because EventSource can't set headers (the server still gates on it +
+ * membership). Returns a cleanup fn; EventSource auto-reconnects, so we don't close on
+ * error. New messages (including the sender's own echo) arrive here.
+ */
+export function streamPoolChat(poolId: string, onMessage: (m: ChatMessage) => void): () => void {
+  const t = getToken();
+  const qs = t ? `?token=${encodeURIComponent(t)}` : "";
+  const es = new EventSource(`${API_BASE}/api/pools/${poolId}/chat/stream${qs}`);
+  es.onmessage = (msg) => {
+    try {
+      const data = JSON.parse(msg.data) as { type: string; message?: ChatMessage };
+      if (data.type === "message" && data.message) onMessage(data.message);
     } catch {
       /* ignore keep-alives */
     }

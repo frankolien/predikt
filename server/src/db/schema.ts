@@ -88,6 +88,27 @@ export const poolMembers = pgTable(
   }),
 );
 
+/** Live chat for a pool room — one row per message, streamed to members in real time.
+ *  Text-only; sender identity (handle/avatar) is joined from `users` at read time. */
+export const poolMessages = pgTable(
+  'pool_messages',
+  {
+    id: text('id').primaryKey(),
+    poolId: text('pool_id')
+      .notNull()
+      .references(() => pools.id),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id),
+    body: text('body').notNull(),
+    createdAt: ts('created_at').notNull(),
+  },
+  (t) => ({
+    // (pool, time) — fetch a room's recent messages in order without a sort.
+    poolIdx: index('pool_messages_pool_idx').on(t.poolId, t.createdAt),
+  }),
+);
+
 /** Immutable audit trail of every points balance change. */
 export const pointsLedger = pgTable(
   'points_ledger',

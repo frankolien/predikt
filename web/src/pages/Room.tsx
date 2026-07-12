@@ -12,6 +12,7 @@ import { PoolHub } from "../components/PoolHub";
 import { MyPoolCard } from "../components/MyPoolCard";
 import { MyRooms } from "../components/MyRooms";
 import { PoolStandings } from "../components/PoolStandings";
+import { RoomChat } from "../components/RoomChat";
 import { Leaderboard } from "../components/Leaderboard";
 import { Onboard } from "../components/Onboard";
 import { VoiceAsk } from "../components/VoiceAsk";
@@ -155,6 +156,7 @@ export default function Room() {
           {fixture && <Scorebug fixture={fixture} />}
           {fixture && isLive && showAi && <LiveReaction fixtureId={fixture.id} scoreKey={scoreKey} />}
           {activePool && <PoolStandings pool={activePool} fixture={fixture} meId={account?.id} />}
+          {activePool && account && <RoomChat poolId={activePool.id} meId={account.id} />}
           <Leaderboard meId={account?.id} refreshKey={lbKey} />
         </div>
 

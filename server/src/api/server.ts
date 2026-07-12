@@ -24,6 +24,7 @@ import * as voice from '../qvac/voice.js';
 import * as accounts from '../store/accounts.js';
 import * as walletAuth from '../store/walletAuth.js';
 import * as store from '../store/pools.js';
+import * as chat from '../store/chat.js';
 import * as wallets from '../store/wallets.js';
 import * as organize from '../organize/store.js';
 import { streamDirector, type DirectorKind } from '../organize/ai.js';
@@ -340,6 +341,60 @@ export function buildApp() {
     const a = await authed(req);
     if (!a) return reply.code(401).send({ error: 'sign in first' });
     return { pools: await store.poolsForUser(a.id) };
+  });
+
+  // ---- room chat — live messages inside a pool, members only ----
+
+  // Recent history (oldest→newest) to prime the panel on open.
+  app.get('/api/pools/:id/chat', async (req, reply) => {
+    const a = await authed(req);
+    if (!a) return reply.code(401).send({ error: 'sign in first' });
+    const { id } = req.params as { id: string };
+    if (!(await chat.isMember(id, a.id))) return reply.code(403).send({ error: 'join the room to chat' });
+    return { messages: await chat.recentMessages(id, 50) };
+  });
+
+  // Post a message — persisted + fanned out to every live subscriber.
+  app.post('/api/pools/:id/chat', async (req, reply) => {
+    const a = await authed(req);
+    if (!a) return reply.code(401).send({ error: 'sign in first' });
+    const { id } = req.params as { id: string };
+    const b = (req.body ?? {}) as { body?: string };
+    try {
+      return { message: await chat.postMessage({ poolId: id, userId: a.id, body: b.body }) };
+    } catch (err) {
+      return reply.code(400).send({ error: (err as Error).message });
+    }
+  });
+
+  // Live push (SSE). EventSource can't set headers, so the session token rides the
+  // query string (like the organize/fantasy AI streams) — still membership-gated.
+  app.get('/api/pools/:id/chat/stream', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const token = (req.query as { token?: string })?.token;
+    const a = await accounts.accountFromToken(token);
+    if (!a || !(await chat.isMember(id, a.id))) {
+      reply.code(403).send({ error: 'join the room to chat' });
+      return;
+    }
+    reply.hijack();
+    const raw = reply.raw;
+    raw.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      Connection: 'keep-alive',
+      'Access-Control-Allow-Origin': '*',
+    });
+    const send = (obj: unknown) => raw.write(`data: ${JSON.stringify(obj)}\n\n`);
+    const unsub = chat.subscribe(id, (m) => send({ type: 'message', message: m }));
+    // Keep proxies/browsers from idling the connection out.
+    const hb = setInterval(() => raw.write(': ping\n\n'), 25_000);
+    const close = () => {
+      clearInterval(hb);
+      unsub();
+    };
+    raw.on('close', close);
+    raw.on('error', close);
   });
 
   app.get('/api/fixtures/:id/pools', async (req) => {
