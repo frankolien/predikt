@@ -65,35 +65,31 @@ export function teamName(t: FixtureSummary['home']): string {
 
 export function welcome(name: string): string {
   return [
-    `👋 Alright ${esc(name)} — welcome to <b>Gaffer</b>.`,
+    `👋 Alright ${esc(name)} — welcome to <b>Predikt</b>.`,
     '',
-    'Gaffer is <b>self-custodial football prediction pools</b> with a private',
-    '<b>on-device AI pundit</b>. You stake USDt on an exact scoreline; the pot is',
-    'held in an on-chain escrow (nobody custodies it) and paid out automatically',
-    'when the match settles. The Gaffer’s match reads run <b>on your device</b> —',
-    'no cloud, no data leaving the box.',
+    'Your football sidekick in Telegram: browse live fixtures, get a read on any',
+    'match from <b>the Gaffer</b> — a private <b>on-device AI</b> pundit — watch pool',
+    'standings, and get pinged the moment a pool settles. When you want to <b>stake',
+    'real USDt</b>, tap through to the Predikt app — you sign with your <b>own',
+    'self-custodial wallet</b> on your own device. The bot never touches your keys.',
     '',
     '<b>Commands</b>',
     '/fixtures — browse upcoming &amp; live matches',
     '/gaffer &lt;fixtureId&gt; — the on-device pundit’s read',
-    '/wallet — create/show your self-custodial wallet',
-    '/join &lt;fixtureId&gt; &lt;home&gt;-&lt;away&gt; — stake a prediction',
     '/pool &lt;fixtureId&gt; — pool standings &amp; payouts',
-    '/me — your wallet, balance &amp; pools',
     '',
-    'Tap /fixtures to get started.',
+    'Tap /fixtures to get started — then “Stake in Predikt” to play.',
   ].join('\n');
 }
 
 export function help(): string {
   return [
-    '<b>Gaffer bot — commands</b>',
+    '<b>Predikt bot — commands</b>',
     '/fixtures — browse upcoming &amp; live matches',
-    '/gaffer &lt;fixtureId&gt; — on-device AI read',
-    '/wallet — your self-custodial wallet',
-    '/join &lt;fixtureId&gt; &lt;home&gt;-&lt;away&gt; — stake a prediction (e.g. /join 2505624 2-1)',
+    '/gaffer &lt;fixtureId&gt; — the Gaffer\'s on-device AI read',
     '/pool &lt;fixtureId&gt; — pool standings',
-    '/me — your wallet &amp; pools',
+    '',
+    '<i>Staking happens in the Predikt app, where you sign with your own wallet — tap “Stake in Predikt” on any fixture.</i>',
   ].join('\n');
 }
 
@@ -282,20 +278,27 @@ export function meSummary(
   return lines.join('\n');
 }
 
-export function settledNotice(pool: PoolView, entry: PoolEntryView | undefined): string {
+export function settledNotice(pool: PoolView, entry?: PoolEntryView): string {
   const f = pool.fixture;
   const lines: string[] = [];
-  lines.push(`🏁 <b>Pool settled — ${teamName(f.home)} v ${teamName(f.away)}</b>`);
+  lines.push(`🏁 <b>Full-time — ${teamName(f.home)} v ${teamName(f.away)}</b>`);
   lines.push(`Result: <b>${esc(score(pool.result))}</b> · pot ${pool.potHuman} USDt`);
   lines.push('');
-  if (!entry) {
-    lines.push('<i>Couldn’t match your entry in this pool.</i>');
-  } else if (entry.won) {
+  if (entry?.won) {
     const exact = entry.exactScore ? ' 🎯 exact score!' : '';
     lines.push(`🎉 You called it <b>${esc(score(entry.prediction))}</b> — <b>+${entry.winnings ?? 0} USDt</b>${exact}`);
     lines.push('Paid straight to your wallet on-chain.');
-  } else {
+  } else if (entry) {
     lines.push(`😖 You had <b>${esc(score(entry.prediction))}</b> — no win this time.`);
+  } else {
+    // Read-only companion: no wallet in the bot, so summarise the on-chain outcome.
+    const winners = pool.entries.filter((e) => e.won).length;
+    lines.push(
+      winners > 0
+        ? `✅ Settled on-chain — ${winners} winner${winners === 1 ? '' : 's'} paid from the pot.`
+        : '✅ Settled on-chain — no correct call, stakes refunded.',
+    );
+    lines.push('Tap below for the on-chain receipt.');
   }
   return lines.join('\n');
 }

@@ -18,7 +18,7 @@ import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { NETWORKS, DEFAULT_NETWORK, type NetworkPreset } from './chain/networks.js';
 
-export type Mode = 'local' | 'testnet';
+export type Mode = 'local' | 'testnet' | 'mainnet';
 
 /**
  * Active network. Prefer GAFFER_NETWORK (local | arbitrum-sepolia | arbitrum);
@@ -31,8 +31,10 @@ const NETWORK_KEY =
 
 export const network: NetworkPreset = NETWORKS[NETWORK_KEY] ?? NETWORKS[DEFAULT_NETWORK];
 
-// `mode` stays for back-compat: everything non-local behaves like the old testnet path.
-export const MODE: Mode = network.kind === 'local' ? 'local' : 'testnet';
+// `mode` now mirrors the active network's kind (local | testnet | mainnet) so the UI
+// and /api/health report the truth — on Arbitrum One this is 'mainnet', not 'testnet'.
+// Only the `=== 'local'` branches are behavioral; nothing keys off 'testnet'.
+export const MODE: Mode = network.kind;
 
 /** Absolute path to the built SPA (Vite output). Served by Fastify in production. */
 export const WEB_DIST = fileURLToPath(new URL('../../web/dist', import.meta.url));
